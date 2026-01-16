@@ -985,18 +985,54 @@ class PlaywrightService {
         };
       }
       
-      // "New & Used" linkine tıkla
-      console.log(`🖱️ [Playwright] "New & Used" linkine tıklanıyor...`);
+      // "New & Used" linkine/div'ine tıkla
+      console.log(`🖱️ [Playwright] "New & Used" elementine tıklanıyor...`);
       try {
+        // Element tipini kontrol et
+        const tagName = await newAndUsedLink.evaluate(el => el.tagName.toLowerCase()).catch(() => '');
+        console.log(`🔍 [Playwright] Element tipi: ${tagName}`);
+        
         await newAndUsedLink.scrollIntoViewIfNeeded();
         await this.safeWait(page, 500);
-        await newAndUsedLink.click({ timeout: 30000 });
-        console.log(`✅ [Playwright] "New & Used" linkine tıklandı`);
+        
+        // Eğer div ise, önce parent link'i dene
+        if (tagName === 'div') {
+          try {
+            // Div'in parent'ında link var mı kontrol et
+            const parentLink = await newAndUsedLink.evaluateHandle(el => {
+              let current = el.parentElement;
+              let depth = 0;
+              while (current && current.tagName !== 'A' && current !== document.body && depth < 5) {
+                current = current.parentElement;
+                depth++;
+              }
+              return current && current.tagName === 'A' ? current : null;
+            }).catch(() => null);
+            
+            if (parentLink && parentLink.asElement()) {
+              console.log(`🔍 [Playwright] Div'in parent link'i bulundu, ona tıklanıyor...`);
+              await parentLink.asElement().click({ timeout: 30000 });
+              console.log(`✅ [Playwright] Parent link'e tıklandı`);
+            } else {
+              // Div'e direkt tıkla
+              await newAndUsedLink.click({ timeout: 30000 });
+              console.log(`✅ [Playwright] Div'e tıklandı`);
+            }
+          } catch (divClickError) {
+            console.warn(`⚠️ [Playwright] Div click başarısız, force click deneniyor: ${divClickError.message}`);
+            await newAndUsedLink.click({ force: true, timeout: 30000 });
+            console.log(`✅ [Playwright] Div'e force click ile tıklandı`);
+          }
+        } else {
+          // Normal link
+          await newAndUsedLink.click({ timeout: 30000 });
+          console.log(`✅ [Playwright] "New & Used" linkine tıklandı`);
+        }
       } catch (clickError) {
         console.warn(`⚠️ [Playwright] Normal click başarısız, force click deneniyor: ${clickError.message}`);
         try {
           await newAndUsedLink.click({ force: true, timeout: 30000 });
-          console.log(`✅ [Playwright] "New & Used" linkine force click ile tıklandı`);
+          console.log(`✅ [Playwright] "New & Used" elementine force click ile tıklandı`);
         } catch (forceClickError) {
           console.error(`❌ [Playwright] Force click de başarısız: ${forceClickError.message}`);
           throw forceClickError;
