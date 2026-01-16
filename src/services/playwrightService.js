@@ -890,6 +890,7 @@ class PlaywrightService {
       }
       
       // "New & Used" linkine tıkla
+      console.log(`🖱️ [Playwright] "New & Used" linkine tıklanıyor...`);
       try {
         await newAndUsedLink.scrollIntoViewIfNeeded();
         await this.safeWait(page, 500);
@@ -897,18 +898,28 @@ class PlaywrightService {
         console.log(`✅ [Playwright] "New & Used" linkine tıklandı`);
       } catch (clickError) {
         console.warn(`⚠️ [Playwright] Normal click başarısız, force click deneniyor: ${clickError.message}`);
-        await newAndUsedLink.click({ force: true, timeout: 30000 });
+        try {
+          await newAndUsedLink.click({ force: true, timeout: 30000 });
+          console.log(`✅ [Playwright] "New & Used" linkine force click ile tıklandı`);
+        } catch (forceClickError) {
+          console.error(`❌ [Playwright] Force click de başarısız: ${forceClickError.message}`);
+          throw forceClickError;
+        }
       }
       
-      // 2 saniye bekle (modal/sayfa açılması için)
-      await this.safeWait(page, 2000);
+      // 3 saniye bekle (modal/sayfa açılması için)
+      console.log(`⏳ [Playwright] Modal/sayfa açılması bekleniyor (3 saniye)...`);
+      await this.safeWait(page, 3000);
       
       // AOD (All Offers Display) container'ını bekle
-      console.log(`🛒 [Playwright] Seller listesi yükleniyor...`);
-      await page.waitForSelector('#all-offers-display, #aod-container, #aod-offer-list', { timeout: 15000 }).catch(() => {
-        console.warn(`⚠️ [Playwright] Seller listesi container bulunamadı`);
-      });
-      await this.safeWait(page, 1000);
+      console.log(`🛒 [Playwright] Seller listesi container'ı bekleniyor...`);
+      try {
+        await page.waitForSelector('#all-offers-display, #aod-container, #aod-offer-list, #aod-offer', { timeout: 20000, state: 'visible' });
+        console.log(`✅ [Playwright] Seller listesi container bulundu`);
+      } catch (e) {
+        console.warn(`⚠️ [Playwright] Seller listesi container bulunamadı, devam ediliyor: ${e.message}`);
+      }
+      await this.safeWait(page, 2000);
       
       // Toplam satıcı sayısını bul
       let totalSellers = 0;
