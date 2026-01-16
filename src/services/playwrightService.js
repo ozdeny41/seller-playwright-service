@@ -792,6 +792,10 @@ class PlaywrightService {
       // Seller bilgilerini çekme mantığı
       console.log(`🛒 [Playwright] Seller bilgileri çekiliyor...`);
       
+      // Sayfanın yüklenmesini bekle
+      await this.safeWait(page, 3000);
+      console.log(`⏳ [Playwright] Sayfa yüklendi, "New & Used" linki aranıyor...`);
+      
       // "New & Used" linkini bul ve tıkla
       const newAndUsedSelectors = [
         'a#aod-ingress-link',
@@ -802,38 +806,81 @@ class PlaywrightService {
       ];
       
       let newAndUsedLink = null;
-      for (const selector of newAndUsedSelectors) {
+      console.log(`🔍 [Playwright] "New & Used" linki aranıyor (${newAndUsedSelectors.length} selector)...`);
+      
+      for (let i = 0; i < newAndUsedSelectors.length; i++) {
+        const selector = newAndUsedSelectors[i];
         try {
+          console.log(`🔍 [Playwright] Selector ${i + 1}/${newAndUsedSelectors.length} deneniyor: ${selector}`);
           // Text içinde "New & Used" geçen link'i bul
-          const links = await page.$$(selector);
-          for (const link of links) {
-            const text = await link.textContent().catch(() => '');
-            if (text.includes('New & Used') || text.includes('from')) {
-              newAndUsedLink = link;
-              console.log(`✅ [Playwright] "New & Used" link bulundu: ${selector}, text: "${text.trim()}"`);
-              break;
+          const links = await page.$$(selector).catch(() => []);
+          console.log(`🔍 [Playwright] ${selector} için ${links.length} link bulundu`);
+          
+          for (let j = 0; j < links.length; j++) {
+            const link = links[j];
+            try {
+              const text = await link.textContent().catch(() => '');
+              console.log(`🔍 [Playwright] Link ${j + 1} text: "${text.trim().substring(0, 50)}"`);
+              if (text.includes('New & Used') || text.includes('from') || text.includes('offers')) {
+                newAndUsedLink = link;
+                console.log(`✅ [Playwright] "New & Used" link bulundu: ${selector}, text: "${text.trim()}"`);
+                break;
+              }
+            } catch (e) {
+              console.warn(`⚠️ [Playwright] Link ${j + 1} text okuma hatası: ${e.message}`);
             }
           }
           if (newAndUsedLink) break;
         } catch (e) {
+          console.warn(`⚠️ [Playwright] Selector ${selector} hatası: ${e.message}`);
           continue;
         }
       }
       
       if (!newAndUsedLink) {
         // Alternatif: Direkt a#aod-ingress-link selector'ını dene
+        console.log(`🔍 [Playwright] Alternatif yöntem deneniyor: a#aod-ingress-link`);
         try {
           newAndUsedLink = await page.$('a#aod-ingress-link');
           if (newAndUsedLink) {
             const text = await newAndUsedLink.textContent().catch(() => '');
             console.log(`✅ [Playwright] "New & Used" link bulundu (alternatif): "${text.trim()}"`);
+          } else {
+            console.warn(`⚠️ [Playwright] a#aod-ingress-link bulunamadı`);
           }
         } catch (e) {
-          console.warn(`⚠️ [Playwright] "New & Used" link bulunamadı: ${e.message}`);
+          console.warn(`⚠️ [Playwright] Alternatif yöntem hatası: ${e.message}`);
+        }
+      }
+      
+      // Daha geniş bir arama yap
+      if (!newAndUsedLink) {
+        console.log(`🔍 [Playwright] Geniş arama yapılıyor: tüm linkler kontrol ediliyor...`);
+        try {
+          const allLinks = await page.$$('a').catch(() => []);
+          console.log(`🔍 [Playwright] Toplam ${allLinks.length} link bulundu, kontrol ediliyor...`);
+          
+          for (let i = 0; i < Math.min(allLinks.length, 50); i++) {
+            const link = allLinks[i];
+            try {
+              const text = await link.textContent().catch(() => '');
+              const href = await link.getAttribute('href').catch(() => '');
+              if ((text.includes('New & Used') || text.includes('from') || text.includes('offers') || href.includes('aod')) && !newAndUsedLink) {
+                newAndUsedLink = link;
+                console.log(`✅ [Playwright] "New & Used" link bulundu (geniş arama): "${text.trim().substring(0, 50)}"`);
+                break;
+              }
+            } catch (e) {
+              // Devam et
+            }
+          }
+        } catch (e) {
+          console.warn(`⚠️ [Playwright] Geniş arama hatası: ${e.message}`);
         }
       }
       
       if (!newAndUsedLink) {
+        console.error(`❌ [Playwright] "New & Used" link bulunamadı - Sayfa URL: ${page.url()}`);
         return {
           success: false,
           data: null,
