@@ -1177,6 +1177,7 @@ class PlaywrightService {
         
       } catch (e) {
         console.error(`❌ [Playwright] Seller bilgileri çekilirken hata: ${e.message}`);
+        uniqueSellers = []; // Hata durumunda boş array
       }
       
       // uniqueSellers varsa onu kullan, yoksa sellers'ı kullan
