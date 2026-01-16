@@ -1152,11 +1152,12 @@ class PlaywrightService {
           const soldByNormalized = seller.soldBy ? seller.soldBy.toLowerCase().trim().replace(/\s+/g, ' ') : null;
           const sellerKey = (sellerNameNormalized || soldByNormalized || `seller-${seller.index}`).toLowerCase().trim();
           
-          // Eğer seller name "n/a", "na", boş veya sadece index ise, her offer'ı ayrı seller olarak say
+          // KRİTİK: "N/A", "na", boş veya geçersiz seller name'leri filtrele (unique seller olarak sayma)
+          // Bu seller'lar genellikle Amazon tarafından gizlenmiş veya geçersiz seller'lar
           if (!sellerKey || sellerKey === 'n/a' || sellerKey === 'na' || sellerKey.startsWith('seller-') || sellerKey.length < 2) {
-            // Seller name bulunamadı, her offer'ı ayrı seller olarak say
-            uniqueSellers.push(seller);
-            continue;
+            // Seller name bulunamadı veya geçersiz, bu seller'ı atla (unique seller olarak sayma)
+            console.log(`⚠️ [Playwright] Geçersiz seller atlandı (unique seller olarak sayılmadı): ${seller.sellerName || seller.soldBy || 'N/A'}`);
+            continue; // Bu seller'ı unique seller listesine ekleme
           }
           
           if (!sellerMap.has(sellerKey)) {
