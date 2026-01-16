@@ -1043,16 +1043,41 @@ class PlaywrightService {
       // Önce href'den URL'yi al (en güvenilir yöntem - element görünür olmasa bile çalışır)
       let href = null;
       try {
-        href = await newAndUsedLink.evaluate(el => {
-          // Önce kendi href'ini kontrol et
-          if (el.href) return el.href;
-          // Sonra parent <a> tag'ini kontrol et
-          const parentLink = el.closest('a');
-          if (parentLink && parentLink.href) return parentLink.href;
-          // Son olarak href attribute'unu kontrol et
-          if (el.getAttribute('href')) return el.getAttribute('href');
-          return null;
-        });
+        // Önce getAttribute ile dene (daha güvenilir)
+        href = await newAndUsedLink.getAttribute('href').catch(() => null);
+        
+        // Eğer yoksa, evaluate ile dene
+        if (!href) {
+          href = await newAndUsedLink.evaluate(el => {
+            // Önce kendi href'ini kontrol et
+            if (el.href) return el.href;
+            // Sonra parent <a> tag'ini kontrol et
+            const parentLink = el.closest('a');
+            if (parentLink && parentLink.href) return parentLink.href;
+            // Son olarak href attribute'unu kontrol et
+            if (el.getAttribute('href')) return el.getAttribute('href');
+            return null;
+          }).catch(() => null);
+        }
+        
+        // Hala yoksa, page context'inde querySelector ile dene
+        if (!href) {
+          const selector = await newAndUsedLink.evaluate(el => {
+            // Element için unique selector oluştur
+            if (el.id) return `#${el.id}`;
+            if (el.className) return `.${el.className.split(' ')[0]}`;
+            return null;
+          }).catch(() => null);
+          
+          if (selector) {
+            href = await page.$eval(selector, el => {
+              if (el.href) return el.href;
+              const parentLink = el.closest('a');
+              if (parentLink && parentLink.href) return parentLink.href;
+              return el.getAttribute('href');
+            }).catch(() => null);
+          }
+        }
         
         if (href) {
           // Relative URL ise absolute URL'ye çevir
