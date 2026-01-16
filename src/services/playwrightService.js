@@ -851,6 +851,7 @@ class PlaywrightService {
       console.log(`⏳ [Playwright] Sayfa yüklendi, "New & Used" linki aranıyor...`);
       
       // "New & Used" linkini bul ve tıkla
+      // KRİTİK: "Other sellers" linki de kabul edilmeli (bazı ürünlerde "New & Used" yerine "Other sellers" görünüyor)
       const newAndUsedSelectors = [
         'a#aod-ingress-link',
         '#dynamic-aod-ingress-box a',
@@ -860,7 +861,7 @@ class PlaywrightService {
         'div[class*="daodi-content"]', // Yeni: class içinde daodi-content geçen div
         'div#dynamic-aod-ingress-box div.daodi-content', // Yeni: tam path
         'div#dynamic-aod-ingress-box div.a-section.a-spacing-none.daodi-content', // KRİTİK: Tam path ile class
-        'a[href*="aod"]',
+        'a[href*="aod"]', // "Other sellers" linki de bu selector'da bulunabilir
         'a[href*="olp"]',
         'span.a-color-base:has-text("New & Used")',
         'a[href*="aod"] span.a-color-base'
@@ -884,8 +885,9 @@ class PlaywrightService {
               const tagName = await element.evaluate(el => el.tagName.toLowerCase()).catch(() => '');
               console.log(`🔍 [Playwright] Element ${j + 1} (${tagName}) text: "${text.trim().substring(0, 50)}"`);
               
-              // Text içinde "New & Used" veya "from" geçiyorsa
-              if (text.includes('New & Used') || text.includes('from') || text.includes('offers') || (text.includes('New') && text.includes('Used'))) {
+              // Text içinde "New & Used", "Other sellers", "from" veya "offers" geçiyorsa
+              // KRİTİK: "Other sellers" linki de kabul edilmeli
+              if (text.includes('New & Used') || text.includes('Other sellers') || text.includes('from') || text.includes('offers') || (text.includes('New') && text.includes('Used'))) {
                 // Eğer div ise, parent veya child link'i bul
                 if (tagName === 'div') {
                   // Div'in parent'ında link var mı?
@@ -1144,9 +1146,13 @@ class PlaywrightService {
         
         for (const seller of sellers) {
           // Seller key'i oluştur: sellerName varsa onu kullan, yoksa soldBy, yoksa index
-          const sellerKey = (seller.sellerName || seller.soldBy || `seller-${seller.index}`).toLowerCase().trim();
+          // KRİTİK: sellerName ve soldBy'yi normalize et (boşlukları temizle, lowercase yap)
+          const sellerNameNormalized = seller.sellerName ? seller.sellerName.toLowerCase().trim().replace(/\s+/g, ' ') : null;
+          const soldByNormalized = seller.soldBy ? seller.soldBy.toLowerCase().trim().replace(/\s+/g, ' ') : null;
+          const sellerKey = (sellerNameNormalized || soldByNormalized || `seller-${seller.index}`).toLowerCase().trim();
           
-          if (!sellerKey || sellerKey === 'n/a' || sellerKey.startsWith('seller-')) {
+          // Eğer seller name "n/a", "na", boş veya sadece index ise, her offer'ı ayrı seller olarak say
+          if (!sellerKey || sellerKey === 'n/a' || sellerKey === 'na' || sellerKey.startsWith('seller-') || sellerKey.length < 2) {
             // Seller name bulunamadı, her offer'ı ayrı seller olarak say
             uniqueSellers.push(seller);
             continue;
@@ -1163,7 +1169,9 @@ class PlaywrightService {
             if (seller.price && existingSeller.price && seller.price < existingSeller.price) {
               sellerMap.set(sellerKey, seller);
               const index = uniqueSellers.findIndex(s => {
-                const sKey = (s.sellerName || s.soldBy || `seller-${s.index}`).toLowerCase().trim();
+                const sName = s.sellerName ? s.sellerName.toLowerCase().trim().replace(/\s+/g, ' ') : null;
+                const sSoldBy = s.soldBy ? s.soldBy.toLowerCase().trim().replace(/\s+/g, ' ') : null;
+                const sKey = (sName || sSoldBy || `seller-${s.index}`).toLowerCase().trim();
                 return sKey === sellerKey;
               });
               if (index !== -1) {
