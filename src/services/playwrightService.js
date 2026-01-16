@@ -855,9 +855,11 @@ class PlaywrightService {
         'a#aod-ingress-link',
         '#dynamic-aod-ingress-box a',
         '#olpLinkWidget_feature_div a',
+        'div.a-section.a-spacing-none.daodi-content', // KRİTİK: Tam class selector
         'div.daodi-content', // Yeni: div element
         'div[class*="daodi-content"]', // Yeni: class içinde daodi-content geçen div
         'div#dynamic-aod-ingress-box div.daodi-content', // Yeni: tam path
+        'div#dynamic-aod-ingress-box div.a-section.a-spacing-none.daodi-content', // KRİTİK: Tam path ile class
         'a[href*="aod"]',
         'a[href*="olp"]',
         'span.a-color-base:has-text("New & Used")',
@@ -883,21 +885,23 @@ class PlaywrightService {
               console.log(`🔍 [Playwright] Element ${j + 1} (${tagName}) text: "${text.trim().substring(0, 50)}"`);
               
               // Text içinde "New & Used" veya "from" geçiyorsa
-              if (text.includes('New & Used') || text.includes('from') || text.includes('offers')) {
+              if (text.includes('New & Used') || text.includes('from') || text.includes('offers') || (text.includes('New') && text.includes('Used'))) {
                 // Eğer div ise, parent veya child link'i bul
                 if (tagName === 'div') {
                   // Div'in parent'ında link var mı?
                   const parentLink = await element.evaluateHandle(el => {
                     let current = el.parentElement;
-                    while (current && current.tagName !== 'A' && current !== document.body) {
+                    let depth = 0;
+                    while (current && current.tagName !== 'A' && current !== document.body && depth < 10) {
                       current = current.parentElement;
+                      depth++;
                     }
                     return current && current.tagName === 'A' ? current : null;
                   }).catch(() => null);
                   
                   if (parentLink && parentLink.asElement()) {
                     newAndUsedLink = parentLink.asElement();
-                    console.log(`✅ [Playwright] "New & Used" link bulundu (div parent): ${selector}, text: "${text.trim()}"`);
+                    console.log(`✅ [Playwright] "New & Used" link bulundu (div parent): ${selector}, text: "${text.trim().substring(0, 80)}"`);
                     break;
                   }
                   
@@ -905,25 +909,28 @@ class PlaywrightService {
                   const childLink = await element.$('a').catch(() => null);
                   if (childLink) {
                     newAndUsedLink = childLink;
-                    console.log(`✅ [Playwright] "New & Used" link bulundu (div child): ${selector}, text: "${text.trim()}"`);
+                    console.log(`✅ [Playwright] "New & Used" link bulundu (div child): ${selector}, text: "${text.trim().substring(0, 80)}"`);
                     break;
                   }
                   
-                  // Div'e direkt tıklanabilir mi?
+                  // Div'e direkt tıklanabilir mi? (data-cursor-element-id varsa tıklanabilir)
                   const isClickable = await element.evaluate(el => {
                     const style = window.getComputedStyle(el);
-                    return style.cursor === 'pointer' || el.onclick || el.getAttribute('data-cursor-element-id');
+                    const hasCursorId = el.getAttribute('data-cursor-element-id');
+                    const hasClickHandler = el.onclick || el.getAttribute('onclick');
+                    return style.cursor === 'pointer' || hasCursorId || hasClickHandler || el.closest('a');
                   }).catch(() => false);
                   
-                  if (isClickable) {
+                  // Eğer div tıklanabilir görünüyorsa veya "New & Used" text'i içeriyorsa, direkt kullan
+                  if (isClickable || text.includes('New & Used')) {
                     newAndUsedLink = element;
-                    console.log(`✅ [Playwright] "New & Used" div bulundu (tıklanabilir): ${selector}, text: "${text.trim()}"`);
+                    console.log(`✅ [Playwright] "New & Used" div bulundu (tıklanabilir): ${selector}, text: "${text.trim().substring(0, 80)}"`);
                     break;
                   }
                 } else {
                   // Direkt link
                   newAndUsedLink = element;
-                  console.log(`✅ [Playwright] "New & Used" link bulundu: ${selector}, text: "${text.trim()}"`);
+                  console.log(`✅ [Playwright] "New & Used" link bulundu: ${selector}, text: "${text.trim().substring(0, 80)}"`);
                   break;
                 }
               }
