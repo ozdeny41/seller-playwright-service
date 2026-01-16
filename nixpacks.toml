@@ -1,0 +1,21 @@
+[phases.setup]
+nixPkgs = ["nodejs-20_x", "npm-10_x"]
+
+[phases.install]
+cmds = [
+  "npm ci",
+  "echo '=== INSTALLING PLAYWRIGHT BROWSERS ==='",
+  "PLAYWRIGHT_BROWSERS_PATH=0 npx playwright install chromium || echo '⚠️ Playwright browser install failed, continuing...'",
+  "echo '=== VERIFYING PLAYWRIGHT CHROMIUM ==='",
+  "if [ -d \"$HOME/.cache/ms-playwright/chromium-*\" ] || [ -d \"node_modules/.cache/playwright/chromium-*\" ]; then echo '✅ Playwright Chromium found'; else echo '⚠️ Playwright Chromium not found in cache'; fi",
+  "echo '=== INSTALLING PLAYWRIGHT SYSTEM DEPENDENCIES ==='",
+  "npx playwright install-deps chromium || echo '⚠️ Playwright deps install failed, continuing...'"
+]
+
+[phases.build]
+cmds = [
+  "echo '✅ Playwright Service build complete'"
+]
+
+[start]
+cmd = "npm start"
