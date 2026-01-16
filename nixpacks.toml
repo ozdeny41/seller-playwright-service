@@ -9,11 +9,12 @@ NODE_VERSION = "20"
 cmds = [
   "npm install",
   "echo '=== INSTALLING PLAYWRIGHT BROWSERS ==='",
-  "PLAYWRIGHT_BROWSERS_PATH=0 npx playwright install chromium --with-deps || echo '⚠️ Playwright browser install failed, continuing...'",
+  "npx playwright install chromium --with-deps",
   "echo '=== VERIFYING PLAYWRIGHT CHROMIUM ==='",
-  "ls -la $HOME/.cache/ms-playwright/ 2>/dev/null || echo '⚠️ Playwright cache directory not found'",
-  "ls -la node_modules/.cache/playwright/ 2>/dev/null || echo '⚠️ Playwright node_modules cache not found'",
-  "echo '=== PLAYWRIGHT INSTALLATION COMPLETE ==='"
+  "ls -la $HOME/.cache/ms-playwright/chromium* 2>/dev/null | head -5 || echo '⚠️ Playwright cache directory not found'",
+  "echo '=== PLAYWRIGHT INSTALLATION COMPLETE ==='",
+  "echo '=== CHECKING CHROMIUM EXECUTABLE ==='",
+  "find $HOME/.cache/ms-playwright -name 'chrome-headless-shell' -type f 2>/dev/null | head -1 || echo '⚠️ Chromium executable not found'"
 ]
 
 [phases.build]
