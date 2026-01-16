@@ -10,15 +10,31 @@ router.post('/', async (req, res, next) => {
   try {
     const { asin, sourceMarketplace = 'amazon.com', targetCountry } = req.body;
     
+    console.log(`📥 [Playwright Service] POST /api/sellers request alındı:`, {
+      asin: asin,
+      sourceMarketplace: sourceMarketplace,
+      targetCountry: targetCountry,
+      bodyKeys: Object.keys(req.body),
+      hasAsin: !!asin
+    });
+    
     if (!asin) {
+      console.warn(`⚠️ [Playwright Service] ASIN eksik, 400 döndürülüyor`);
       return res.status(400).json({ 
         ok: false, 
         error: 'ASIN is required' 
       });
     }
     
-    console.log(`📡 [Playwright Service] Seller info request: ${asin} from ${sourceMarketplace}`);
+    console.log(`📡 [Playwright Service] Seller info request başlatılıyor: ${asin} from ${sourceMarketplace}`);
     const result = await playwrightService.getSellerInfo(asin, sourceMarketplace, targetCountry);
+    
+    console.log(`📤 [Playwright Service] Seller info response hazırlanıyor:`, {
+      success: result.success,
+      hasData: !!result.data,
+      sellersCount: result.data?.sellers?.length || 0,
+      error: result.error || null
+    });
     
     if (result.success) {
       res.json({ ok: true, data: result.data });
