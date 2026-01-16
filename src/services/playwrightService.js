@@ -812,10 +812,15 @@ class PlaywrightService {
       // "New & Used" linkini bul ve tıkla
       const newAndUsedSelectors = [
         'a#aod-ingress-link',
-        'span.a-color-base:has-text("New & Used")',
-        'a[href*="aod"] span.a-color-base',
+        '#dynamic-aod-ingress-box a',
         '#olpLinkWidget_feature_div a',
-        '#dynamic-aod-ingress-box a'
+        'div.daodi-content', // Yeni: div element
+        'div[class*="daodi-content"]', // Yeni: class içinde daodi-content geçen div
+        'div#dynamic-aod-ingress-box div.daodi-content', // Yeni: tam path
+        'a[href*="aod"]',
+        'a[href*="olp"]',
+        'span.a-color-base:has-text("New & Used")',
+        'a[href*="aod"] span.a-color-base'
       ];
       
       let newAndUsedLink = null;
@@ -825,22 +830,64 @@ class PlaywrightService {
         const selector = newAndUsedSelectors[i];
         try {
           console.log(`🔍 [Playwright] Selector ${i + 1}/${newAndUsedSelectors.length} deneniyor: ${selector}`);
-          // Text içinde "New & Used" geçen link'i bul
-          const links = await page.$$(selector).catch(() => []);
-          console.log(`🔍 [Playwright] ${selector} için ${links.length} link bulundu`);
+          // Hem link hem de div elementlerini kontrol et
+          const elements = await page.$$(selector).catch(() => []);
+          console.log(`🔍 [Playwright] ${selector} için ${elements.length} element bulundu`);
           
-          for (let j = 0; j < links.length; j++) {
-            const link = links[j];
+          for (let j = 0; j < elements.length; j++) {
+            const element = elements[j];
             try {
-              const text = await link.textContent().catch(() => '');
-              console.log(`🔍 [Playwright] Link ${j + 1} text: "${text.trim().substring(0, 50)}"`);
+              const text = await element.textContent().catch(() => '');
+              const tagName = await element.evaluate(el => el.tagName.toLowerCase()).catch(() => '');
+              console.log(`🔍 [Playwright] Element ${j + 1} (${tagName}) text: "${text.trim().substring(0, 50)}"`);
+              
+              // Text içinde "New & Used" veya "from" geçiyorsa
               if (text.includes('New & Used') || text.includes('from') || text.includes('offers')) {
-                newAndUsedLink = link;
-                console.log(`✅ [Playwright] "New & Used" link bulundu: ${selector}, text: "${text.trim()}"`);
-                break;
+                // Eğer div ise, parent veya child link'i bul
+                if (tagName === 'div') {
+                  // Div'in parent'ında link var mı?
+                  const parentLink = await element.evaluateHandle(el => {
+                    let current = el.parentElement;
+                    while (current && current.tagName !== 'A' && current !== document.body) {
+                      current = current.parentElement;
+                    }
+                    return current && current.tagName === 'A' ? current : null;
+                  }).catch(() => null);
+                  
+                  if (parentLink && parentLink.asElement()) {
+                    newAndUsedLink = parentLink.asElement();
+                    console.log(`✅ [Playwright] "New & Used" link bulundu (div parent): ${selector}, text: "${text.trim()}"`);
+                    break;
+                  }
+                  
+                  // Div'in içinde link var mı?
+                  const childLink = await element.$('a').catch(() => null);
+                  if (childLink) {
+                    newAndUsedLink = childLink;
+                    console.log(`✅ [Playwright] "New & Used" link bulundu (div child): ${selector}, text: "${text.trim()}"`);
+                    break;
+                  }
+                  
+                  // Div'e direkt tıklanabilir mi?
+                  const isClickable = await element.evaluate(el => {
+                    const style = window.getComputedStyle(el);
+                    return style.cursor === 'pointer' || el.onclick || el.getAttribute('data-cursor-element-id');
+                  }).catch(() => false);
+                  
+                  if (isClickable) {
+                    newAndUsedLink = element;
+                    console.log(`✅ [Playwright] "New & Used" div bulundu (tıklanabilir): ${selector}, text: "${text.trim()}"`);
+                    break;
+                  }
+                } else {
+                  // Direkt link
+                  newAndUsedLink = element;
+                  console.log(`✅ [Playwright] "New & Used" link bulundu: ${selector}, text: "${text.trim()}"`);
+                  break;
+                }
               }
             } catch (e) {
-              console.warn(`⚠️ [Playwright] Link ${j + 1} text okuma hatası: ${e.message}`);
+              console.warn(`⚠️ [Playwright] Element ${j + 1} kontrol hatası: ${e.message}`);
             }
           }
           if (newAndUsedLink) break;
@@ -866,25 +913,61 @@ class PlaywrightService {
         }
       }
       
-      // Daha geniş bir arama yap
+      // Daha geniş bir arama yap - hem link hem div
       if (!newAndUsedLink) {
-        console.log(`🔍 [Playwright] Geniş arama yapılıyor: tüm linkler kontrol ediliyor...`);
+        console.log(`🔍 [Playwright] Geniş arama yapılıyor: tüm elementler kontrol ediliyor...`);
         try {
-          const allLinks = await page.$$('a').catch(() => []);
-          console.log(`🔍 [Playwright] Toplam ${allLinks.length} link bulundu, kontrol ediliyor...`);
-          
-          for (let i = 0; i < Math.min(allLinks.length, 50); i++) {
-            const link = allLinks[i];
-            try {
-              const text = await link.textContent().catch(() => '');
-              const href = await link.getAttribute('href').catch(() => '');
-              if ((text.includes('New & Used') || text.includes('from') || text.includes('offers') || href.includes('aod')) && !newAndUsedLink) {
-                newAndUsedLink = link;
-                console.log(`✅ [Playwright] "New & Used" link bulundu (geniş arama): "${text.trim().substring(0, 50)}"`);
-                break;
+          // Önce #dynamic-aod-ingress-box içindeki tüm elementleri kontrol et
+          const aodBox = await page.$('#dynamic-aod-ingress-box').catch(() => null);
+          if (aodBox) {
+            console.log(`🔍 [Playwright] #dynamic-aod-ingress-box bulundu, içindeki elementler kontrol ediliyor...`);
+            const boxElements = await aodBox.$$('*').catch(() => []);
+            for (const elem of boxElements) {
+              try {
+                const text = await elem.textContent().catch(() => '');
+                const tagName = await elem.evaluate(el => el.tagName.toLowerCase()).catch(() => '');
+                if (text.includes('New & Used') || text.includes('from')) {
+                  // Parent link'i bul
+                  const parentLink = await elem.evaluateHandle(el => {
+                    let current = el;
+                    for (let i = 0; i < 5; i++) {
+                      if (current.tagName === 'A') return current;
+                      current = current.parentElement;
+                      if (!current || current === document.body) break;
+                    }
+                    return null;
+                  }).catch(() => null);
+                  
+                  if (parentLink && parentLink.asElement()) {
+                    newAndUsedLink = parentLink.asElement();
+                    console.log(`✅ [Playwright] "New & Used" link bulundu (geniş arama - parent): "${text.trim().substring(0, 50)}"`);
+                    break;
+                  }
+                }
+              } catch (e) {
+                // Devam et
               }
-            } catch (e) {
-              // Devam et
+            }
+          }
+          
+          // Hala bulunamadıysa, tüm linkleri kontrol et
+          if (!newAndUsedLink) {
+            const allLinks = await page.$$('a').catch(() => []);
+            console.log(`🔍 [Playwright] Toplam ${allLinks.length} link bulundu, kontrol ediliyor...`);
+            
+            for (let i = 0; i < Math.min(allLinks.length, 100); i++) {
+              const link = allLinks[i];
+              try {
+                const text = await link.textContent().catch(() => '');
+                const href = await link.getAttribute('href').catch(() => '');
+                if ((text.includes('New & Used') || text.includes('from') || text.includes('offers') || href.includes('aod') || href.includes('olp')) && !newAndUsedLink) {
+                  newAndUsedLink = link;
+                  console.log(`✅ [Playwright] "New & Used" link bulundu (geniş arama): "${text.trim().substring(0, 50)}"`);
+                  break;
+                }
+              } catch (e) {
+                // Devam et
+              }
             }
           }
         } catch (e) {
