@@ -1037,56 +1037,96 @@ class PlaywrightService {
       }
       
       // "New & Used" linkine/div'ine tıkla
+      // KRİTİK: Element görünür olmayabilir, href'den URL'yi al ve direkt git (daha güvenilir)
       console.log(`🖱️ [Playwright] "New & Used" elementine tıklanıyor...`);
+      
+      // Önce href'den URL'yi al (en güvenilir yöntem - element görünür olmasa bile çalışır)
+      let href = null;
       try {
-        // Element tipini kontrol et
-        const tagName = await newAndUsedLink.evaluate(el => el.tagName.toLowerCase()).catch(() => '');
-        console.log(`🔍 [Playwright] Element tipi: ${tagName}`);
+        href = await newAndUsedLink.evaluate(el => {
+          // Önce kendi href'ini kontrol et
+          if (el.href) return el.href;
+          // Sonra parent <a> tag'ini kontrol et
+          const parentLink = el.closest('a');
+          if (parentLink && parentLink.href) return parentLink.href;
+          // Son olarak href attribute'unu kontrol et
+          if (el.getAttribute('href')) return el.getAttribute('href');
+          return null;
+        });
         
-        await newAndUsedLink.scrollIntoViewIfNeeded();
-        await this.safeWait(page, 500);
-        
-        // Eğer div ise, önce parent link'i dene
-        if (tagName === 'div') {
-          try {
-            // Div'in parent'ında link var mı kontrol et
-            const parentLink = await newAndUsedLink.evaluateHandle(el => {
-              let current = el.parentElement;
-              let depth = 0;
-              while (current && current.tagName !== 'A' && current !== document.body && depth < 5) {
-                current = current.parentElement;
-                depth++;
-              }
-              return current && current.tagName === 'A' ? current : null;
-            }).catch(() => null);
-            
-            if (parentLink && parentLink.asElement()) {
-              console.log(`🔍 [Playwright] Div'in parent link'i bulundu, ona tıklanıyor...`);
-              await parentLink.asElement().click({ timeout: 30000 });
-              console.log(`✅ [Playwright] Parent link'e tıklandı`);
-            } else {
-              // Div'e direkt tıkla
-              await newAndUsedLink.click({ timeout: 30000 });
-              console.log(`✅ [Playwright] Div'e tıklandı`);
-            }
-          } catch (divClickError) {
-            console.warn(`⚠️ [Playwright] Div click başarısız, force click deneniyor: ${divClickError.message}`);
-            await newAndUsedLink.click({ force: true, timeout: 30000 });
-            console.log(`✅ [Playwright] Div'e force click ile tıklandı`);
+        if (href) {
+          // Relative URL ise absolute URL'ye çevir
+          if (!href.startsWith('http')) {
+            href = `https://www.amazon.com${href.startsWith('/') ? href : '/' + href}`;
           }
+          console.log(`🔗 [Playwright] href'den URL alındı: ${href}`);
+          
+          // Direkt URL'ye git (tıklama yerine - daha güvenilir)
+          await page.goto(href, { waitUntil: 'domcontentloaded', timeout: 60000 });
+          console.log(`✅ [Playwright] "New & Used" sayfasına direkt gidildi (href kullanılarak)`);
         } else {
-          // Normal link
-          await newAndUsedLink.click({ timeout: 30000 });
-          console.log(`✅ [Playwright] "New & Used" linkine tıklandı`);
+          throw new Error('href bulunamadı, normal click deneniyor');
         }
-      } catch (clickError) {
-        console.warn(`⚠️ [Playwright] Normal click başarısız, force click deneniyor: ${clickError.message}`);
+      } catch (hrefError) {
+        console.warn(`⚠️ [Playwright] href bulunamadı veya git başarısız, normal click deneniyor: ${hrefError.message}`);
+        
+        // href başarısız, normal click dene
         try {
-          await newAndUsedLink.click({ force: true, timeout: 30000 });
-          console.log(`✅ [Playwright] "New & Used" elementine force click ile tıklandı`);
-        } catch (forceClickError) {
-          console.error(`❌ [Playwright] Force click de başarısız: ${forceClickError.message}`);
-          throw forceClickError;
+          // Element tipini kontrol et
+          const tagName = await newAndUsedLink.evaluate(el => el.tagName.toLowerCase()).catch(() => '');
+          console.log(`🔍 [Playwright] Element tipi: ${tagName}`);
+          
+          await newAndUsedLink.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {});
+          await this.safeWait(page, 1000);
+          
+          // Eğer div ise, önce parent link'i dene
+          if (tagName === 'div') {
+            try {
+              // Div'in parent'ında link var mı kontrol et
+              const parentLink = await newAndUsedLink.evaluateHandle(el => {
+                let current = el.parentElement;
+                let depth = 0;
+                while (current && current.tagName !== 'A' && current !== document.body && depth < 10) {
+                  current = current.parentElement;
+                  depth++;
+                }
+                return current && current.tagName === 'A' ? current : null;
+              }).catch(() => null);
+              
+              if (parentLink && parentLink.asElement()) {
+                console.log(`🔍 [Playwright] Div'in parent link'i bulundu, ona tıklanıyor...`);
+                await parentLink.asElement().click({ timeout: 30000 });
+                console.log(`✅ [Playwright] Parent link'e tıklandı`);
+              } else {
+                // Div'e JavaScript ile tıkla
+                await newAndUsedLink.evaluate(el => el.click());
+                console.log(`✅ [Playwright] Div'e JavaScript ile tıklandı`);
+              }
+            } catch (divClickError) {
+              console.warn(`⚠️ [Playwright] Div click başarısız, force click deneniyor: ${divClickError.message}`);
+              await newAndUsedLink.click({ force: true, timeout: 30000 });
+              console.log(`✅ [Playwright] Div'e force click ile tıklandı`);
+            }
+          } else {
+            // Normal link
+            await newAndUsedLink.click({ timeout: 30000 });
+            console.log(`✅ [Playwright] "New & Used" linkine tıklandı`);
+          }
+        } catch (clickError) {
+          console.warn(`⚠️ [Playwright] Normal click başarısız, force click deneniyor: ${clickError.message}`);
+          try {
+            await newAndUsedLink.click({ force: true, timeout: 30000 });
+            console.log(`✅ [Playwright] "New & Used" elementine force click ile tıklandı`);
+          } catch (forceClickError) {
+            console.error(`❌ [Playwright] Force click de başarısız: ${forceClickError.message}`);
+            // Son çare: AOD URL'yi manuel oluştur
+            const currentUrl = page.url();
+            const baseUrl = currentUrl.split('?')[0];
+            const aodUrl = `${baseUrl}?showAllOffers=1`;
+            console.log(`🔗 [Playwright] Son çare: AOD URL'ye gidiliyor: ${aodUrl}`);
+            await page.goto(aodUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+            console.log(`✅ [Playwright] AOD sayfasına gidildi (son çare)`);
+          }
         }
       }
       
