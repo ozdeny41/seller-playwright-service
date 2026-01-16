@@ -1010,9 +1010,10 @@ class PlaywrightService {
               try {
                 const text = await link.textContent().catch(() => '');
                 const href = await link.getAttribute('href').catch(() => '');
-                if ((text.includes('New & Used') || text.includes('from') || text.includes('offers') || href.includes('aod') || href.includes('olp')) && !newAndUsedLink) {
+                // KRİTİK: "Other sellers" linki de kabul edilmeli
+                if ((text.includes('New & Used') || text.includes('Other sellers') || text.includes('from') || text.includes('offers') || href.includes('aod') || href.includes('olp')) && !newAndUsedLink) {
                   newAndUsedLink = link;
-                  console.log(`✅ [Playwright] "New & Used" link bulundu (geniş arama): "${text.trim().substring(0, 50)}"`);
+                  console.log(`✅ [Playwright] "New & Used" / "Other sellers" link bulundu (geniş arama): "${text.trim().substring(0, 50)}"`);
                   break;
                 }
               } catch (e) {
@@ -1026,11 +1027,11 @@ class PlaywrightService {
       }
       
       if (!newAndUsedLink) {
-        console.error(`❌ [Playwright] "New & Used" link bulunamadı - Sayfa URL: ${page.url()}`);
+        console.error(`❌ [Playwright] "New & Used" / "Other sellers" link bulunamadı - Sayfa URL: ${page.url()}`);
         return {
           success: false,
           data: null,
-          error: 'New & Used link bulunamadı - Bu ürün için seller bilgisi yok olabilir',
+          error: 'New & Used / Other sellers link bulunamadı - Bu ürün için seller bilgisi yok olabilir',
           status: 404
         };
       }
