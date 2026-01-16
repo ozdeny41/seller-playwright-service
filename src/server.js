@@ -5,45 +5,61 @@ const { execSync } = require('child_process');
 
 dotenv.config();
 
-// Railway'de Playwright browser'larını runtime'da yükle (eğer yoksa)
+// Railway'de Playwright browser'larını runtime'da yükle (background'da, non-blocking)
 if (process.env.RAILWAY_ENVIRONMENT) {
-  console.log('🔧 [Railway] Playwright browser\'ları kontrol ediliyor...');
-  const fs = require('fs');
-  const path = require('path');
-  
-  // Browser executable'ı kontrol et
-  const browserPaths = [
-    path.join(process.env.HOME || '/root', '.cache/ms-playwright/chromium_headless_shell-1200/chrome-headless-shell-linux64/chrome-headless-shell'),
-    path.join(process.cwd(), 'node_modules/.cache/playwright/chromium_headless_shell-1200/chrome-headless-shell-linux64/chrome-headless-shell')
-  ];
-  
-  let browserFound = false;
-  for (const browserPath of browserPaths) {
-    try {
-      if (fs.existsSync(browserPath)) {
-        console.log(`✅ [Railway] Browser bulundu: ${browserPath}`);
-        browserFound = true;
-        break;
+  // Browser kontrolü ve yükleme işlemini background'da yap (server başlamasını engellemesin)
+  setImmediate(() => {
+    console.log('🔧 [Railway] Playwright browser\'ları kontrol ediliyor (background)...');
+    const fs = require('fs');
+    const path = require('path');
+    
+    // Browser executable'ı kontrol et
+    const browserPaths = [
+      path.join(process.env.HOME || '/root', '.cache/ms-playwright/chromium_headless_shell-1200/chrome-headless-shell-linux64/chrome-headless-shell'),
+      path.join(process.cwd(), 'node_modules/.cache/playwright/chromium_headless_shell-1200/chrome-headless-shell-linux64/chrome-headless-shell')
+    ];
+    
+    let browserFound = false;
+    for (const browserPath of browserPaths) {
+      try {
+        if (fs.existsSync(browserPath)) {
+          console.log(`✅ [Railway] Browser bulundu: ${browserPath}`);
+          browserFound = true;
+          break;
+        }
+      } catch (e) {
+        // Devam et
       }
-    } catch (e) {
-      // Devam et
     }
-  }
-  
-  if (!browserFound) {
-    console.log('⚠️ [Railway] Browser bulunamadı, yükleniyor...');
-    try {
-      const { execSync } = require('child_process');
-      execSync('npx playwright install chromium --with-deps', { 
-        stdio: 'inherit',
-        timeout: 300000 // 5 dakika timeout
+    
+    if (!browserFound) {
+      console.log('⚠️ [Railway] Browser bulunamadı, background\'da yükleniyor...');
+      // Background'da yükle (server başlamasını engellemesin)
+      const { spawn } = require('child_process');
+      const installProcess = spawn('npx', ['playwright', 'install', 'chromium', '--with-deps'], {
+        stdio: 'pipe',
+        detached: true
       });
-      console.log('✅ [Railway] Playwright browser\'ları yüklendi');
-    } catch (e) {
-      console.error('❌ [Railway] Playwright browser yükleme hatası:', e.message);
-      // Hata olsa bile devam et, belki build'de yüklenmiştir
+      
+      installProcess.stdout.on('data', (data) => {
+        console.log(`[Browser Install] ${data.toString().trim()}`);
+      });
+      
+      installProcess.stderr.on('data', (data) => {
+        console.error(`[Browser Install Error] ${data.toString().trim()}`);
+      });
+      
+      installProcess.on('close', (code) => {
+        if (code === 0) {
+          console.log('✅ [Railway] Playwright browser\'ları yüklendi (background)');
+        } else {
+          console.warn(`⚠️ [Railway] Browser yükleme tamamlandı (code: ${code}), belki build\'de yüklenmiştir`);
+        }
+      });
+      
+      installProcess.unref(); // Process'i detach et, server kapanmasını engellemesin
     }
-  }
+  });
 }
 
 const app = express();
