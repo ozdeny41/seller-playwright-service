@@ -732,10 +732,13 @@ class PlaywrightService {
         ];
         
         let browserFound = false;
+        let foundBrowserPath = null;
         for (const browserPath of browserPaths) {
           try {
             if (fs.existsSync(browserPath)) {
               browserFound = true;
+              foundBrowserPath = browserPath;
+              console.log(`✅ [Playwright] Browser bulundu: ${browserPath}`);
               break;
             }
           } catch (e) {
@@ -745,7 +748,7 @@ class PlaywrightService {
         
         // Browser yoksa ve yükleniyorsa, kısa bir süre bekle
         if (!browserFound) {
-          console.log('⏳ [Playwright] Browser yükleniyor, bekleniyor...');
+          console.log('⏳ [Playwright] Browser bulunamadı, yükleniyor...');
           const { execSync } = require('child_process');
           try {
             execSync('npx playwright install chromium --with-deps', { 
@@ -755,6 +758,7 @@ class PlaywrightService {
             console.log('✅ [Playwright] Browser yüklendi');
           } catch (e) {
             console.warn('⚠️ [Playwright] Browser yükleme hatası (devam ediliyor):', e.message);
+            // Browser yükleme başarısız olsa bile devam et, belki build'de yüklenmiştir
           }
         }
       }
