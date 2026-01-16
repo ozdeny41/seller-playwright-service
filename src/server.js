@@ -1,8 +1,28 @@
 const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
+const { execSync } = require('child_process');
 
 dotenv.config();
+
+// Railway'de Playwright browser'larını runtime'da yükle (eğer yoksa)
+if (process.env.RAILWAY_ENVIRONMENT) {
+  try {
+    console.log('🔧 [Railway] Playwright browser\'ları kontrol ediliyor...');
+    const { execSync } = require('child_process');
+    try {
+      execSync('npx playwright install chromium --with-deps', { 
+        stdio: 'inherit',
+        timeout: 300000 // 5 dakika timeout
+      });
+      console.log('✅ [Railway] Playwright browser\'ları yüklendi');
+    } catch (e) {
+      console.warn('⚠️ [Railway] Playwright browser yükleme hatası (devam ediliyor):', e.message);
+    }
+  } catch (e) {
+    console.warn('⚠️ [Railway] Browser yükleme kontrolü atlandı:', e.message);
+  }
+}
 
 const app = express();
 const PORT = process.env.PORT || 3002;

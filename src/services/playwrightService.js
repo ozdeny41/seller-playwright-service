@@ -723,17 +723,30 @@ class PlaywrightService {
       console.log(`🎭 [Playwright] Seller bilgileri çekiliyor: ${asin} from ${sourceMarketplace}`);
       
       // Browser başlat
-      browser = await chromium.launch({
-        headless: true,
-        args: [
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-dev-shm-usage',
-          '--disable-accelerated-2d-canvas',
-          '--disable-gpu',
-          '--disable-blink-features=AutomationControlled'
-        ]
-      });
+      console.log('🌐 [Playwright] Browser başlatılıyor...');
+      try {
+        browser = await chromium.launch({
+          headless: true,
+          args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-accelerated-2d-canvas',
+            '--disable-gpu',
+            '--disable-blink-features=AutomationControlled',
+            '--single-process', // Railway için önemli
+            '--disable-background-timer-throttling',
+            '--disable-backgrounding-occluded-windows',
+            '--disable-renderer-backgrounding'
+          ],
+          timeout: 30000
+        });
+        console.log('✅ [Playwright] Browser başlatıldı');
+      } catch (launchError) {
+        console.error('❌ [Playwright] Browser başlatma hatası:', launchError.message);
+        console.error('❌ [Playwright] Error stack:', launchError.stack);
+        throw new Error(`Browser başlatılamadı: ${launchError.message}`);
+      }
 
       const context = await browser.newContext({
         viewport: { width: 1920, height: 1080 },
