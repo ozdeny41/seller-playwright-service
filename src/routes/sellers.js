@@ -5,7 +5,6 @@ const playwrightService = require('../services/playwrightService');
 /**
  * POST /api/sellers
  * Get seller information for a product using Playwright
- * Asenkron çalışır - hemen 202 Accepted döner, arka planda işlem yapar
  */
 router.post('/', async (req, res, next) => {
   try {
@@ -19,28 +18,16 @@ router.post('/', async (req, res, next) => {
     }
     
     console.log(`📡 [Playwright Service] Seller info request: ${asin} from ${sourceMarketplace}`);
+    const result = await playwrightService.getSellerInfo(asin, sourceMarketplace, targetCountry);
     
-    // Hemen 202 Accepted dön, arka planda işlem yap
-    res.status(202).json({ 
-      ok: true, 
-      message: 'Seller bilgileri çekiliyor...',
-      asin: asin,
-      status: 'processing'
-    });
-    
-    // Arka planda seller bilgilerini çek (non-blocking)
-    setImmediate(async () => {
-      try {
-        const result = await playwrightService.getSellerInfo(asin, sourceMarketplace, targetCountry);
-        if (result.success) {
-          console.log(`✅ [Playwright Service] Seller info completed: ${asin} - ${result.data.sellers?.length || 0} sellers`);
-        } else {
-          console.warn(`⚠️ [Playwright Service] Seller info failed: ${asin} - ${result.error}`);
-        }
-      } catch (error) {
-        console.error(`❌ [Playwright Service] Seller info error (background):`, error.message);
-      }
-    });
+    if (result.success) {
+      res.json({ ok: true, data: result.data });
+    } else {
+      res.status(result.status || 500).json({ 
+        ok: false, 
+        error: result.error || 'Failed to get seller information' 
+      });
+    }
   } catch (error) {
     console.error(`❌ [Playwright Service] Seller info error:`, error.message);
     next(error);

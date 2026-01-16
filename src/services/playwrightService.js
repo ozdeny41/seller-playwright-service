@@ -722,6 +722,43 @@ class PlaywrightService {
     try {
       console.log(`🎭 [Playwright] Seller bilgileri çekiliyor: ${asin} from ${sourceMarketplace}`);
       
+      // Browser başlatmadan önce, eğer Railway'de browser yükleniyorsa bekle
+      if (process.env.RAILWAY_ENVIRONMENT) {
+        const fs = require('fs');
+        const path = require('path');
+        const browserPaths = [
+          path.join(process.env.HOME || '/root', '.cache/ms-playwright/chromium_headless_shell-1200/chrome-headless-shell-linux64/chrome-headless-shell'),
+          path.join(process.cwd(), 'node_modules/.cache/playwright/chromium_headless_shell-1200/chrome-headless-shell-linux64/chrome-headless-shell')
+        ];
+        
+        let browserFound = false;
+        for (const browserPath of browserPaths) {
+          try {
+            if (fs.existsSync(browserPath)) {
+              browserFound = true;
+              break;
+            }
+          } catch (e) {
+            // Devam et
+          }
+        }
+        
+        // Browser yoksa ve yükleniyorsa, kısa bir süre bekle
+        if (!browserFound) {
+          console.log('⏳ [Playwright] Browser yükleniyor, bekleniyor...');
+          const { execSync } = require('child_process');
+          try {
+            execSync('npx playwright install chromium --with-deps', { 
+              stdio: 'pipe',
+              timeout: 120000 // 2 dakika timeout
+            });
+            console.log('✅ [Playwright] Browser yüklendi');
+          } catch (e) {
+            console.warn('⚠️ [Playwright] Browser yükleme hatası (devam ediliyor):', e.message);
+          }
+        }
+      }
+      
       // Browser başlat
       console.log('🌐 [Playwright] Browser başlatılıyor...');
       try {
