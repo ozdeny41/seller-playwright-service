@@ -1117,6 +1117,7 @@ class PlaywrightService {
       
       // Tüm seller offer'larını çek
       const sellers = [];
+      let uniqueSellers = [];
       try {
         // Tüm #aod-offer elementlerini bul
         const offerElements = await page.$$('#aod-offer, div[id^="aod-offer"]');
@@ -1128,17 +1129,59 @@ class PlaywrightService {
             const sellerData = await this.extractSellerDataFromOffer(page, offer, i);
             if (sellerData) {
               sellers.push(sellerData);
-              console.log(`✅ [Playwright] Seller ${i + 1}/${offerElements.length} çekildi: ${sellerData.sellerName || 'N/A'}`);
+              console.log(`✅ [Playwright] Seller ${i + 1}/${offerElements.length} çekildi: ${sellerData.sellerName || sellerData.soldBy || 'N/A'}`);
             }
           } catch (e) {
             console.warn(`⚠️ [Playwright] Seller ${i + 1} çekilirken hata: ${e.message}`);
           }
         }
         
-        console.log(`✅ [Playwright] Toplam ${sellers.length} seller bilgisi çekildi`);
+        console.log(`✅ [Playwright] Toplam ${sellers.length} seller offer çekildi`);
+        
+        // KRİTİK: Unique seller'ları bul (aynı sellerName veya soldBy'ye sahip offer'ları grupla)
+        // Amazon'da bir satıcının birden fazla offer'ı olabilir (New, Used - Like New, vb.)
+        const sellerMap = new Map(); // sellerName veya soldBy -> seller data
+        
+        for (const seller of sellers) {
+          // Seller key'i oluştur: sellerName varsa onu kullan, yoksa soldBy, yoksa index
+          const sellerKey = (seller.sellerName || seller.soldBy || `seller-${seller.index}`).toLowerCase().trim();
+          
+          if (!sellerKey || sellerKey === 'n/a' || sellerKey.startsWith('seller-')) {
+            // Seller name bulunamadı, her offer'ı ayrı seller olarak say
+            uniqueSellers.push(seller);
+            continue;
+          }
+          
+          if (!sellerMap.has(sellerKey)) {
+            // İlk kez görülen seller, ekle
+            sellerMap.set(sellerKey, seller);
+            uniqueSellers.push(seller);
+          } else {
+            // Aynı seller'ın başka bir offer'ı, en iyi fiyatlı olanı tut (veya ilkini)
+            const existingSeller = sellerMap.get(sellerKey);
+            // Eğer yeni offer daha düşük fiyatlıysa, onu kullan
+            if (seller.price && existingSeller.price && seller.price < existingSeller.price) {
+              sellerMap.set(sellerKey, seller);
+              const index = uniqueSellers.findIndex(s => {
+                const sKey = (s.sellerName || s.soldBy || `seller-${s.index}`).toLowerCase().trim();
+                return sKey === sellerKey;
+              });
+              if (index !== -1) {
+                uniqueSellers[index] = seller;
+              }
+            }
+          }
+        }
+        
+        console.log(`🔍 [Playwright] Unique seller sayısı: ${uniqueSellers.length} (toplam offer: ${sellers.length})`);
+        
       } catch (e) {
         console.error(`❌ [Playwright] Seller bilgileri çekilirken hata: ${e.message}`);
       }
+      
+      // uniqueSellers varsa onu kullan, yoksa sellers'ı kullan
+      const finalSellers = uniqueSellers.length > 0 ? uniqueSellers : sellers;
+      const finalTotalSellers = uniqueSellers.length > 0 ? uniqueSellers.length : (totalSellers || sellers.length);
       
       return {
         success: true,
@@ -1146,8 +1189,8 @@ class PlaywrightService {
           asin: asin,
           sourceMarketplace: sourceMarketplace,
           targetCountry: targetCountry,
-          totalSellers: totalSellers || sellers.length,
-          sellers: sellers,
+          totalSellers: finalTotalSellers, // Unique seller sayısı
+          sellers: finalSellers, // Unique seller'lar
           marketplace: 'source' // Kaynak mağaza
         },
         error: null,
