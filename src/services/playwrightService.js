@@ -520,22 +520,37 @@ class PlaywrightService {
       let isUsed = false;
       
       try {
-        // KRİTİK: Pinned offer için sidebar'dan condition çek (#aod-offer-heading > span.a-size-base.a-text-bold)
+        // KRİTİK: Sidebar'dan condition çek
+        // Pinned offer için: #aod-offer-heading > span.a-size-base.a-text-bold
+        // Diğer offer'lar için: offer içinde condition text'i
         if (isPinnedOffer) {
           try {
             const conditionElement = await page.$('#aod-offer-heading > span.a-size-base.a-text-bold').catch(() => null);
             if (conditionElement) {
               condition = await conditionElement.textContent().then(t => t.trim()).catch(() => null);
               if (condition) {
-                console.log(`✅ [Playwright] Pinned offer condition sidebar'dan çekildi: ${condition}`);
+                console.log(`✅ [Playwright] Offer ${index} condition sidebar'dan çekildi: ${condition}`);
               }
             }
           } catch (e) {
-            console.warn(`⚠️ [Playwright] Pinned offer condition sidebar'dan çekilemedi: ${e.message}`);
+            console.warn(`⚠️ [Playwright] Offer ${index} condition sidebar'dan çekilemedi: ${e.message}`);
+          }
+        } else {
+          // Diğer offer'lar için: offer içinde condition text'i bul
+          try {
+            const conditionElement = await offerElement.$('span#aod-condition-text, span.a-color-state, #aod-offer-heading span.a-size-base.a-text-bold').catch(() => null);
+            if (conditionElement) {
+              condition = await conditionElement.textContent().then(t => t.trim()).catch(() => null);
+              if (condition) {
+                console.log(`✅ [Playwright] Offer ${index} condition sidebar'dan çekildi: ${condition}`);
+              }
+            }
+          } catch (e) {
+            // Condition bulunamadı
           }
         }
         
-        // Eğer pinned offer için condition bulunamadıysa veya normal offer ise, normal yöntemi kullan
+        // Eğer sidebar'dan condition bulunamadıysa, normal yöntemi kullan
         if (!condition) {
           try {
             // Önce condition text'i bul
@@ -594,10 +609,12 @@ class PlaywrightService {
       let price = null;
       let priceText = null;
       try {
-        // KRİTİK: Pinned offer için sidebar'dan price çek (#aod-price-0 içindeki span)
+        // KRİTİK: Sidebar'dan price çek
+        // Pinned offer için: #aod-price-0
+        // Diğer offer'lar için: #aod-price-${index}
         if (isPinnedOffer) {
           try {
-            const priceElement = await page.$('#aod-price-0 span[aria-hidden="true"]').catch(() => null);
+            const priceElement = await page.$('#aod-price-0 span[aria-hidden="true"], #aod-price-0 .a-offscreen').catch(() => null);
             if (priceElement) {
               priceText = await priceElement.textContent().then(t => t.trim()).catch(() => null);
               if (priceText) {
@@ -606,16 +623,35 @@ class PlaywrightService {
                 const priceMatch = cleanedPriceText.match(/[\$£€]?([\d,]+\.?\d*)/);
                 if (priceMatch) {
                   price = parseFloat(priceMatch[1].replace(/,/g, ''));
-                  console.log(`✅ [Playwright] Pinned offer price sidebar'dan çekildi: ${priceText} -> ${price}`);
+                  console.log(`✅ [Playwright] Offer ${index} price sidebar'dan çekildi: ${priceText} -> ${price}`);
                 }
               }
             }
           } catch (e) {
-            console.warn(`⚠️ [Playwright] Pinned offer price sidebar'dan çekilemedi: ${e.message}`);
+            console.warn(`⚠️ [Playwright] Offer ${index} price sidebar'dan çekilemedi: ${e.message}`);
+          }
+        } else {
+          // Diğer offer'lar için: #aod-price-${index}
+          try {
+            const priceElement = await page.$(`#aod-price-${index} span[aria-hidden="true"], #aod-price-${index} .a-offscreen`).catch(() => null);
+            if (priceElement) {
+              priceText = await priceElement.textContent().then(t => t.trim()).catch(() => null);
+              if (priceText) {
+                // Fiyatı parse et - "$132 . 99" -> 132.99 (boşlukları temizle)
+                const cleanedPriceText = priceText.replace(/\s+/g, '');
+                const priceMatch = cleanedPriceText.match(/[\$£€]?([\d,]+\.?\d*)/);
+                if (priceMatch) {
+                  price = parseFloat(priceMatch[1].replace(/,/g, ''));
+                  console.log(`✅ [Playwright] Offer ${index} price sidebar'dan çekildi: ${priceText} -> ${price}`);
+                }
+              }
+            }
+          } catch (e) {
+            console.warn(`⚠️ [Playwright] Offer ${index} price sidebar'dan çekilemedi: ${e.message}`);
           }
         }
         
-        // Eğer pinned offer için price bulunamadıysa veya normal offer ise, normal yöntemi kullan
+        // Eğer sidebar'dan price bulunamadıysa, normal yöntemi kullan
         if (!price && !priceText) {
           // Price selector'ları
           const priceSelectors = [
@@ -672,7 +708,9 @@ class PlaywrightService {
       // Ships from
       let shipsFrom = null;
       try {
-        // KRİTİK: Pinned offer için sidebar'dan shipsFrom çek (#aod-offer-shipsFrom)
+        // KRİTİK: Sidebar'dan shipsFrom çek
+        // Pinned offer için: #aod-offer-shipsFrom (global)
+        // Diğer offer'lar için: offer içinde #aod-offer-shipsFrom veya text içinde
         if (isPinnedOffer) {
           try {
             const shipsFromElement = await page.$('#aod-offer-shipsFrom').catch(() => null);
@@ -683,18 +721,37 @@ class PlaywrightService {
                 const shipsFromMatch = shipsFromText.match(/Ships from\s+(.+)/i);
                 if (shipsFromMatch) {
                   shipsFrom = shipsFromMatch[1].trim();
-                  console.log(`✅ [Playwright] Pinned offer shipsFrom sidebar'dan çekildi: ${shipsFrom}`);
+                  console.log(`✅ [Playwright] Offer ${index} shipsFrom sidebar'dan çekildi: ${shipsFrom}`);
                 } else {
                   shipsFrom = shipsFromText.replace(/Ships from\s*/i, '').trim();
                 }
               }
             }
           } catch (e) {
-            console.warn(`⚠️ [Playwright] Pinned offer shipsFrom sidebar'dan çekilemedi: ${e.message}`);
+            console.warn(`⚠️ [Playwright] Offer ${index} shipsFrom sidebar'dan çekilemedi: ${e.message}`);
+          }
+        } else {
+          // Diğer offer'lar için: offer içinde shipsFrom bul
+          try {
+            const shipsFromElement = await offerElement.$('#aod-offer-shipsFrom, [id*="shipsFrom"]').catch(() => null);
+            if (shipsFromElement) {
+              const shipsFromText = await shipsFromElement.textContent().then(t => t.trim()).catch(() => null);
+              if (shipsFromText) {
+                const shipsFromMatch = shipsFromText.match(/Ships from\s+(.+)/i);
+                if (shipsFromMatch) {
+                  shipsFrom = shipsFromMatch[1].trim();
+                  console.log(`✅ [Playwright] Offer ${index} shipsFrom sidebar'dan çekildi: ${shipsFrom}`);
+                } else {
+                  shipsFrom = shipsFromText.replace(/Ships from\s*/i, '').trim();
+                }
+              }
+            }
+          } catch (e) {
+            // Ships from bulunamadı
           }
         }
         
-        // Eğer pinned offer için shipsFrom bulunamadıysa veya normal offer ise, normal yöntemi kullan
+        // Eğer sidebar'dan shipsFrom bulunamadıysa, normal yöntemi kullan
         if (!shipsFrom) {
           // "Ships from Amazon.com" formatından "Amazon.com" çıkar
           const allText = await offerElement.textContent();
@@ -712,7 +769,9 @@ class PlaywrightService {
       let sellerName = null;
       let sellerRating = null;
       try {
-        // KRİTİK: Pinned offer için sidebar'dan soldBy çek (#aod-offer-soldBy)
+        // KRİTİK: Sidebar'dan soldBy çek
+        // Pinned offer için: #aod-offer-soldBy (global)
+        // Diğer offer'lar için: offer içinde #aod-offer-soldBy veya text içinde
         if (isPinnedOffer) {
           try {
             const soldByElement = await page.$('#aod-offer-soldBy').catch(() => null);
@@ -725,23 +784,48 @@ class PlaywrightService {
                   soldBy = soldByMatch[1].trim();
                   // Seller name'i temizle (eğer "vancasso Reactive Art" gibi uzunsa sadece ilk kelimeyi al)
                   sellerName = soldBy.split(' ')[0]; // İlk kelime
-                  console.log(`✅ [Playwright] Pinned offer soldBy sidebar'dan çekildi: ${soldBy} -> sellerName: ${sellerName}`);
+                  console.log(`✅ [Playwright] Offer ${index} soldBy sidebar'dan çekildi: ${soldBy} -> sellerName: ${sellerName}`);
                 }
                 
                 // Seller rating - "Seller rating is 5 out of 5 stars (77 ratings)"
                 const ratingMatch = soldByText.match(/(\d+(?:\.\d+)?)\s+out of\s+5\s+stars/i);
                 if (ratingMatch) {
                   sellerRating = parseFloat(ratingMatch[1]);
-                  console.log(`✅ [Playwright] Pinned offer sellerRating sidebar'dan çekildi: ${sellerRating}`);
+                  console.log(`✅ [Playwright] Offer ${index} sellerRating sidebar'dan çekildi: ${sellerRating}`);
                 }
               }
             }
           } catch (e) {
-            console.warn(`⚠️ [Playwright] Pinned offer soldBy sidebar'dan çekilemedi: ${e.message}`);
+            console.warn(`⚠️ [Playwright] Offer ${index} soldBy sidebar'dan çekilemedi: ${e.message}`);
+          }
+        } else {
+          // Diğer offer'lar için: offer içinde soldBy bul
+          try {
+            const soldByElement = await offerElement.$('#aod-offer-soldBy, [id*="soldBy"]').catch(() => null);
+            if (soldByElement) {
+              const soldByText = await soldByElement.textContent().then(t => t.trim()).catch(() => null);
+              if (soldByText) {
+                const soldByMatch = soldByText.match(/Sold by\s+([^\n\r]+?)(?:\s+Seller rating|$)/i);
+                if (soldByMatch) {
+                  soldBy = soldByMatch[1].trim();
+                  sellerName = soldBy.split(' ')[0];
+                  console.log(`✅ [Playwright] Offer ${index} soldBy sidebar'dan çekildi: ${soldBy} -> sellerName: ${sellerName}`);
+                }
+                
+                // Seller rating
+                const ratingMatch = soldByText.match(/(\d+(?:\.\d+)?)\s+out of\s+5\s+stars/i);
+                if (ratingMatch) {
+                  sellerRating = parseFloat(ratingMatch[1]);
+                  console.log(`✅ [Playwright] Offer ${index} sellerRating sidebar'dan çekildi: ${sellerRating}`);
+                }
+              }
+            }
+          } catch (e) {
+            // Sold by bulunamadı
           }
         }
         
-        // Eğer pinned offer için soldBy bulunamadıysa veya normal offer ise, normal yöntemi kullan
+        // Eğer sidebar'dan soldBy bulunamadıysa, normal yöntemi kullan
         if (!soldBy) {
           // "Sold by vancasso Ceramic Art" formatından seller name çıkar
           const allText = await offerElement.textContent();
@@ -774,7 +858,9 @@ class PlaywrightService {
       let shippingPrice = null;
       let expressDeliveryDate = null;
       try {
-        // KRİTİK: Pinned offer için sidebar'dan delivery bilgilerini çek
+        // KRİTİK: Sidebar'dan delivery bilgilerini çek
+        // Pinned offer için: #mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE_LARGE (global)
+        // Diğer offer'lar için: offer içinde delivery bilgileri
         if (isPinnedOffer) {
           try {
             // Standard delivery: #mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE_LARGE > span
@@ -794,7 +880,7 @@ class PlaywrightService {
                   deliveryDate = dateMatch[1].trim();
                 }
                 
-                console.log(`✅ [Playwright] Pinned offer standard delivery sidebar'dan çekildi: ${standardDeliveryText} -> shippingPrice: ${shippingPrice}, deliveryDate: ${deliveryDate}`);
+                console.log(`✅ [Playwright] Offer ${index} standard delivery sidebar'dan çekildi: ${standardDeliveryText} -> shippingPrice: ${shippingPrice}, deliveryDate: ${deliveryDate}`);
               }
             }
             
@@ -807,16 +893,37 @@ class PlaywrightService {
                 const dateMatch = expressDeliveryText.match(/((?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),?\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2})/i);
                 if (dateMatch) {
                   expressDeliveryDate = dateMatch[1].trim();
-                  console.log(`✅ [Playwright] Pinned offer express delivery sidebar'dan çekildi: ${expressDeliveryText} -> expressDeliveryDate: ${expressDeliveryDate}`);
+                  console.log(`✅ [Playwright] Offer ${index} express delivery sidebar'dan çekildi: ${expressDeliveryText} -> expressDeliveryDate: ${expressDeliveryDate}`);
                 }
               }
             }
           } catch (e) {
-            console.warn(`⚠️ [Playwright] Pinned offer delivery sidebar'dan çekilemedi: ${e.message}`);
+            console.warn(`⚠️ [Playwright] Offer ${index} delivery sidebar'dan çekilemedi: ${e.message}`);
+          }
+        } else {
+          // Diğer offer'lar için: offer içinde delivery bilgileri bul
+          try {
+            const deliveryText = await offerElement.textContent();
+            
+            // Delivery date çıkar
+            const dateMatch = deliveryText.match(/((?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),?\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2})/i);
+            if (dateMatch) {
+              deliveryDate = dateMatch[1].trim();
+              console.log(`✅ [Playwright] Offer ${index} deliveryDate sidebar'dan çekildi: ${deliveryDate}`);
+            }
+            
+            // Shipping price çıkar - "$105.69 delivery" veya "$105.69 delivery Wednesday"
+            const shippingMatch = deliveryText.match(/[\$£€]?\s*([\d,]+\.?\d*)\s+delivery/i);
+            if (shippingMatch) {
+              shippingPrice = parseFloat(shippingMatch[1].replace(/,/g, ''));
+              console.log(`✅ [Playwright] Offer ${index} shippingPrice sidebar'dan çekildi: ${shippingPrice}`);
+            }
+          } catch (e) {
+            // Delivery bilgisi bulunamadı
           }
         }
         
-        // Eğer pinned offer için delivery bulunamadıysa veya normal offer ise, normal yöntemi kullan
+        // Eğer sidebar'dan delivery bulunamadıysa, normal yöntemi kullan
         if (!deliveryDate && !shippingPrice) {
           // Delivery text'i bul - "Wednesday, January 21" veya "$105.69 delivery Wednesday, January 21"
           const allText = await offerElement.textContent();
@@ -1352,39 +1459,41 @@ class PlaywrightService {
         console.warn(`⚠️ [Playwright] "See more" linki kontrol edilemedi: ${e.message}`);
       }
       
-      // Tüm seller offer'larını çek
+      // Tüm seller offer'larını çek - KRİTİK: Sidebar'dan tüm bilgileri çek
       const sellers = [];
       let uniqueSellers = [];
       try {
-        // Önce pinned offer'ı çek (eğer varsa)
+        // Önce pinned offer'ı çek (eğer varsa) - Sidebar'dan
         try {
           const pinnedOffer = await page.$('#aod-pinned-offer').catch(() => null);
           if (pinnedOffer) {
-            console.log(`🔍 [Playwright] Pinned offer bulundu, bilgiler çekiliyor...`);
+            console.log(`🔍 [Playwright] Pinned offer bulundu, sidebar'dan bilgiler çekiliyor...`);
             const pinnedSellerData = await this.extractSellerDataFromOffer(page, pinnedOffer, 0, true);
             if (pinnedSellerData) {
               sellers.push(pinnedSellerData);
-              console.log(`✅ [Playwright] Pinned offer çekildi: ${pinnedSellerData.sellerName || pinnedSellerData.soldBy || 'N/A'}`);
+              console.log(`✅ [Playwright] Pinned offer sidebar'dan çekildi: ${pinnedSellerData.sellerName || pinnedSellerData.soldBy || 'N/A'}`);
             }
           }
         } catch (e) {
           console.warn(`⚠️ [Playwright] Pinned offer çekilemedi: ${e.message}`);
         }
         
-        // Tüm #aod-offer elementlerini bul (pinned offer hariç)
-        const offerElements = await page.$$('#aod-offer, div[id^="aod-offer"]');
-        console.log(`🔍 [Playwright] ${offerElements.length} seller offer bulundu (pinned hariç)`);
+        // Tüm #aod-offer elementlerini bul (pinned offer hariç) - Sidebar'dan çek
+        // Her offer için: #aod-offer-0, #aod-offer-1, vb.
+        const offerElements = await page.$$('#aod-offer, div[id^="aod-offer-"]');
+        console.log(`🔍 [Playwright] ${offerElements.length} seller offer bulundu (sidebar'dan çekilecek)`);
         
         for (let i = 0; i < offerElements.length; i++) {
           const offer = offerElements[i];
           try {
+            // Her offer için sidebar'dan bilgileri çek (index'e göre selector'lar kullanılacak)
             const sellerData = await this.extractSellerDataFromOffer(page, offer, i + 1, false);
             if (sellerData) {
               sellers.push(sellerData);
-              console.log(`✅ [Playwright] Seller ${i + 2}/${offerElements.length + 1} çekildi: ${sellerData.sellerName || sellerData.soldBy || 'N/A'}`);
+              console.log(`✅ [Playwright] Seller ${i + 2}/${offerElements.length + 1} sidebar'dan çekildi: ${sellerData.sellerName || sellerData.soldBy || 'N/A'}`);
             }
           } catch (e) {
-            console.warn(`⚠️ [Playwright] Seller ${i + 2} çekilirken hata: ${e.message}`);
+            console.warn(`⚠️ [Playwright] Seller ${i + 2} sidebar'dan çekilirken hata: ${e.message}`);
           }
         }
         
