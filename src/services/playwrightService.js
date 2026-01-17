@@ -1346,9 +1346,32 @@ class PlaywrightService {
           }
           console.log(`🔗 [Playwright] href'den URL alındı: ${href}`);
           
-          // Direkt URL'ye git (tıklama yerine - daha güvenilir)
-          await page.goto(href, { waitUntil: 'domcontentloaded', timeout: 60000 });
-          console.log(`✅ [Playwright] "New & Used" sayfasına direkt gidildi (href kullanılarak)`);
+          // KRİTİK: Hash URL (#dynamic-aod-ingress-box) ise, JavaScript ile sidebar'ı aç
+          if (href.includes('#dynamic-aod-ingress-box')) {
+            console.log(`🔗 [Playwright] Hash URL tespit edildi, JavaScript ile sidebar açılıyor...`);
+            try {
+              // Önce link'e JavaScript ile tıkla (sidebar'ı açmak için)
+              await newAndUsedLink.evaluate(el => {
+                // Event trigger et
+                const clickEvent = new MouseEvent('click', {
+                  bubbles: true,
+                  cancelable: true,
+                  view: window
+                });
+                el.dispatchEvent(clickEvent);
+              });
+              console.log(`✅ [Playwright] Hash URL için JavaScript event trigger edildi`);
+              await this.safeWait(page, 2000); // Sidebar'ın açılması için bekle
+            } catch (jsError) {
+              console.warn(`⚠️ [Playwright] JavaScript event trigger başarısız, normal click deneniyor: ${jsError.message}`);
+              // Fallback: Normal click
+              await newAndUsedLink.click({ timeout: 30000 });
+            }
+          } else {
+            // Normal URL ise direkt git
+            await page.goto(href, { waitUntil: 'domcontentloaded', timeout: 60000 });
+            console.log(`✅ [Playwright] "New & Used" sayfasına direkt gidildi (href kullanılarak)`);
+          }
         } else {
           throw new Error('href bulunamadı, normal click deneniyor');
         }
