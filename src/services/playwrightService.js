@@ -505,6 +505,245 @@ class PlaywrightService {
   }
 
   /**
+   * Extract buybox data from PDP (Product Detail Page)
+   * @param {Object} page - Playwright page object
+   * @returns {Promise<Object | null>}
+   */
+  async extractBuyboxData(page) {
+    try {
+      console.log(`🔍 [Playwright] Buybox bilgileri çekiliyor (PDP sayfasından)...`);
+      
+      // Sayfanın yüklenmesini bekle
+      await this.safeWait(page, 3000);
+      
+      // ADIM 1: Shipper/Seller bilgisi
+      let sellerName = null;
+      let soldBy = null;
+      let shipsFrom = null;
+      try {
+        // "Shipper / Seller" label'ından sonraki text'i al
+        const merchantInfoSelectors = [
+          'div#merchantInfoFeature_feature_div div.offer-display-feature-text-message',
+          'div#merchantInfoFeature_feature_div span.offer-display-feature-text-message',
+          'div#merchantInfoFeature_feature_div .offer-display-feature-text-message',
+          'div#merchantInfoFeature_feature_div span.a-size-small.offer-display-feature-text-message'
+        ];
+        
+        for (const selector of merchantInfoSelectors) {
+          try {
+            const element = await page.$(selector);
+            if (element) {
+              sellerName = await element.textContent().then(t => t.trim()).catch(() => null);
+              soldBy = sellerName;
+              if (sellerName) {
+                console.log(`✅ [Playwright] Buybox sellerName çekildi: ${sellerName}`);
+                break;
+              }
+            }
+          } catch (e) {
+            continue;
+          }
+        }
+        
+        // "Ships From" bilgisi (eğer varsa)
+        try {
+          const shipsFromText = await page.textContent('div#merchantInfoFeature_feature_div').catch(() => '');
+          const shipsFromMatch = shipsFromText.match(/Ships from\s+([^\n\r]+)/i);
+          if (shipsFromMatch) {
+            shipsFrom = shipsFromMatch[1].trim();
+            console.log(`✅ [Playwright] Buybox shipsFrom çekildi: ${shipsFrom}`);
+          }
+        } catch (e) {
+          // Ships from bulunamadı
+        }
+      } catch (e) {
+        console.warn(`⚠️ [Playwright] Buybox sellerName çekilemedi: ${e.message}`);
+      }
+      
+      // ADIM 2: Ürün durumu (Condition) - "Buy new:" veya "Buy used:"
+      let condition = 'New';
+      let isNew = true;
+      let isUsed = false;
+      try {
+        const conditionSelectors = [
+          'div#newAccordionCaption_feature_div span.a-text-bold',
+          'div#newAccordionCaption_feature_div .a-text-bold',
+          'h5 div#newAccordionCaption_feature_div span.a-text-bold'
+        ];
+        
+        for (const selector of conditionSelectors) {
+          try {
+            const element = await page.$(selector);
+            if (element) {
+              const conditionText = await element.textContent().then(t => t.trim()).catch(() => null);
+              if (conditionText) {
+                const conditionLower = conditionText.toLowerCase();
+                if (conditionLower.includes('buy new') || conditionLower.includes('new')) {
+                  condition = 'New';
+                  isNew = true;
+                  isUsed = false;
+                } else if (conditionLower.includes('buy used') || conditionLower.includes('used')) {
+                  condition = 'Used';
+                  isNew = false;
+                  isUsed = true;
+                }
+                console.log(`✅ [Playwright] Buybox condition çekildi: ${condition} (${conditionText})`);
+                break;
+              }
+            }
+          } catch (e) {
+            continue;
+          }
+        }
+      } catch (e) {
+        console.warn(`⚠️ [Playwright] Buybox condition çekilemedi: ${e.message}`);
+      }
+      
+      // ADIM 3: Fiyat ve Shipping & Import Charges
+      let price = null;
+      let priceText = null;
+      let shippingPrice = null;
+      let shippingText = null;
+      try {
+        // Fiyat: div#corePrice_feature_div içindeki price
+        const priceSelectors = [
+          'div#corePrice_feature_div span.a-price span[aria-hidden="true"]',
+          'div#corePrice_feature_div span.a-price .a-offscreen',
+          'div#corePrice_feature_div .a-price span[aria-hidden="true"]',
+          'div#corePrice_feature_div .a-spacing-top-mini'
+        ];
+        
+        for (const selector of priceSelectors) {
+          try {
+            const element = await page.$(selector);
+            if (element) {
+              priceText = await element.textContent().then(t => t.trim()).catch(() => null);
+              if (priceText) {
+                // Fiyatı parse et - "$199 . 99" -> 199.99 (boşlukları temizle)
+                const cleanedPriceText = priceText.replace(/\s+/g, '');
+                const priceMatch = cleanedPriceText.match(/[\$£€]?([\d,]+\.?\d*)/);
+                if (priceMatch) {
+                  price = parseFloat(priceMatch[1].replace(/,/g, ''));
+                  console.log(`✅ [Playwright] Buybox price çekildi: ${priceText} -> ${price}`);
+                  break;
+                }
+              }
+            }
+          } catch (e) {
+            continue;
+          }
+        }
+        
+        // Shipping & Import Charges: div#amazonGlobal_feature_div
+        try {
+          const shippingElement = await page.$('div#amazonGlobal_feature_div span.a-size-base.a-color-secondary');
+          if (shippingElement) {
+            shippingText = await shippingElement.textContent().then(t => t.trim()).catch(() => null);
+            if (shippingText) {
+              // "$94.13 Shipping & Import Charges to United Kingdom" formatından fiyatı çıkar
+              const shippingMatch = shippingText.match(/[\$£€]?\s*([\d,]+\.?\d*)/);
+              if (shippingMatch) {
+                shippingPrice = parseFloat(shippingMatch[1].replace(/,/g, ''));
+                console.log(`✅ [Playwright] Buybox shippingPrice çekildi: ${shippingText} -> ${shippingPrice}`);
+              }
+            }
+          }
+        } catch (e) {
+          console.warn(`⚠️ [Playwright] Buybox shippingPrice çekilemedi: ${e.message}`);
+        }
+      } catch (e) {
+        console.warn(`⚠️ [Playwright] Buybox price çekilemedi: ${e.message}`);
+      }
+      
+      // ADIM 4: Tarihler (sadece gün ve ay, önündeki price alınmayacak)
+      let standardDeliveryDate = null;
+      let expressDeliveryDate = null;
+      try {
+        // Standard delivery: div#mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE_LARGE > span > span.a-text-bold
+        const standardDeliverySelectors = [
+          'div#mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE_LARGE span.a-text-bold',
+          'div#mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE_LARGE > span > span.a-text-bold',
+          'div#deliveryBlock_feature_div div#mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE_LARGE span.a-text-bold'
+        ];
+        
+        for (const selector of standardDeliverySelectors) {
+          try {
+            const element = await page.$(selector);
+            if (element) {
+              const dateText = await element.textContent().then(t => t.trim()).catch(() => null);
+              if (dateText) {
+                // "Monday, January 26" formatından sadece "January 26" çıkar (gün adını kaldır)
+                const dateMatch = dateText.match(/((?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2})/i);
+                if (dateMatch) {
+                  standardDeliveryDate = dateMatch[1].trim();
+                  console.log(`✅ [Playwright] Buybox standardDeliveryDate çekildi: ${dateText} -> ${standardDeliveryDate}`);
+                  break;
+                }
+              }
+            }
+          } catch (e) {
+            continue;
+          }
+        }
+        
+        // Express delivery: div#mir-layout-DELIVERY_BLOCK-slot-SECONDARY_DELIVERY_MESSAGE_LARGE > span
+        const expressDeliverySelectors = [
+          'div#mir-layout-DELIVERY_BLOCK-slot-SECONDARY_DELIVERY_MESSAGE_LARGE span',
+          'div#mir-layout-DELIVERY_BLOCK-slot-SECONDARY_DELIVERY_MESSAGE_LARGE > span',
+          'div#deliveryBlock_feature_div div#mir-layout-DELIVERY_BLOCK-slot-SECONDARY_DELIVERY_MESSAGE_LARGE span'
+        ];
+        
+        for (const selector of expressDeliverySelectors) {
+          try {
+            const element = await page.$(selector);
+            if (element) {
+              const dateText = await element.textContent().then(t => t.trim()).catch(() => null);
+              if (dateText) {
+                // "Or fastest delivery Friday, January 23" formatından sadece "January 23" çıkar
+                const dateMatch = dateText.match(/((?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2})/i);
+                if (dateMatch) {
+                  expressDeliveryDate = dateMatch[1].trim();
+                  console.log(`✅ [Playwright] Buybox expressDeliveryDate çekildi: ${dateText} -> ${expressDeliveryDate}`);
+                  break;
+                }
+              }
+            }
+          } catch (e) {
+            continue;
+          }
+        }
+      } catch (e) {
+        console.warn(`⚠️ [Playwright] Buybox delivery dates çekilemedi: ${e.message}`);
+      }
+      
+      // Buybox objesi oluştur
+      if (sellerName || price) {
+        return {
+          sellerName: sellerName || null,
+          soldBy: soldBy || sellerName || null,
+          shipsFrom: shipsFrom || null,
+          condition: condition,
+          isNew: isNew,
+          isUsed: isUsed,
+          price: price,
+          priceText: priceText || (price ? `$${price.toFixed(2)}` : null),
+          shippingPrice: shippingPrice,
+          shippingText: shippingText || null,
+          standardDeliveryDate: standardDeliveryDate,
+          expressDeliveryDate: expressDeliveryDate,
+          isBuybox: true,
+          index: 0
+        };
+      }
+      
+      return null;
+    } catch (e) {
+      console.error(`❌ [Playwright] Buybox data extraction hatası: ${e.message}`);
+      return null;
+    }
+  }
+
+  /**
    * Extract seller data from a single offer element
    * @param {Object} page - Playwright page object
    * @param {Object} offerElement - Playwright element handle for #aod-offer
@@ -1121,6 +1360,15 @@ class PlaywrightService {
           }
         }
       }
+      
+      // KRİTİK: Buybox bilgilerini çek (PDP sayfasından) - AOD'ye gitmeden önce
+      console.log(`🛒 [Playwright] Buybox bilgileri çekiliyor (PDP sayfasından)...`);
+      const buyboxData = await this.extractBuyboxData(page);
+      if (buyboxData) {
+        console.log(`✅ [Playwright] Buybox bilgileri çekildi: ${buyboxData.sellerName || 'N/A'}, $${buyboxData.price || 'N/A'}`);
+      } else {
+        console.warn(`⚠️ [Playwright] Buybox bilgileri çekilemedi`);
+      }
 
       // Seller bilgilerini çekme mantığı
       console.log(`🛒 [Playwright] Seller bilgileri çekiliyor...`);
@@ -1610,6 +1858,24 @@ class PlaywrightService {
       const finalSellers = uniqueSellers.length > 0 ? uniqueSellers : sellers;
       const finalTotalSellers = uniqueSellers.length > 0 ? uniqueSellers.length : (totalSellers || sellers.length);
       
+      // KRİTİK: Buybox'ı seller listesinin başına ekle (eğer varsa ve listede yoksa)
+      if (buyboxData) {
+        // Buybox'ın listede olup olmadığını kontrol et
+        const buyboxExists = finalSellers.some(s => {
+          const sName = (s.sellerName || s.soldBy || '').toLowerCase().trim();
+          const bName = (buyboxData.sellerName || buyboxData.soldBy || '').toLowerCase().trim();
+          return sName === bName && s.isBuybox === true;
+        });
+        
+        if (!buyboxExists) {
+          // Buybox'ı listenin başına ekle
+          finalSellers.unshift(buyboxData);
+          console.log(`✅ [Playwright] Buybox seller listesinin başına eklendi`);
+        } else {
+          console.log(`ℹ️ [Playwright] Buybox zaten listede mevcut`);
+        }
+      }
+      
       return {
         success: true,
         data: {
@@ -1617,8 +1883,9 @@ class PlaywrightService {
           sourceMarketplace: sourceMarketplace,
           targetCountry: targetCountry,
           totalSellers: finalTotalSellers, // Unique seller sayısı
-          sellers: finalSellers, // Unique seller'lar
-          marketplace: 'source' // Kaynak mağaza
+          sellers: finalSellers, // Unique seller'lar (buybox dahil)
+          marketplace: 'source', // Kaynak mağaza
+          buybox: buyboxData || null // Buybox bilgileri (ayrıca döndür)
         },
         error: null,
         status: 200
