@@ -785,8 +785,7 @@ class PlaywrightService {
                 const soldByMatch = soldByText.match(/Sold by\s+([^\n\r]+?)(?:\s+Seller rating|$)/i);
                 if (soldByMatch) {
                   soldBy = soldByMatch[1].trim();
-                  // Seller name'i temizle (eğer "vancasso Reactive Art" gibi uzunsa sadece ilk kelimeyi al)
-                  sellerName = soldBy.split(' ')[0]; // İlk kelime
+                  sellerName = soldBy;
                   console.log(`✅ [Playwright] Offer ${index} soldBy sidebar'dan çekildi: ${soldBy} -> sellerName: ${sellerName}`);
                 }
                 
@@ -811,7 +810,7 @@ class PlaywrightService {
                 const soldByMatch = soldByText.match(/Sold by\s+([^\n\r]+?)(?:\s+Seller rating|$)/i);
                 if (soldByMatch) {
                   soldBy = soldByMatch[1].trim();
-                  sellerName = soldBy.split(' ')[0];
+                  sellerName = soldBy;
                   console.log(`✅ [Playwright] Offer ${index} soldBy sidebar'dan çekildi: ${soldBy} -> sellerName: ${sellerName}`);
                 }
                 
@@ -830,13 +829,33 @@ class PlaywrightService {
         
         // Eğer sidebar'dan soldBy bulunamadıysa, normal yöntemi kullan
         if (!soldBy) {
-          // "Sold by vancasso Ceramic Art" formatından seller name çıkar
-          const allText = await offerElement.textContent();
-          const soldByMatch = allText.match(/Sold by\s+([^\n\r]+?)(?:\s+Seller rating|$)/i);
-          if (soldByMatch) {
-            soldBy = soldByMatch[1].trim();
-            // Seller name'i temizle (eğer "vancasso Ceramic Art" gibi uzunsa sadece ilk kelimeyi al)
-            sellerName = soldBy.split(' ')[0]; // İlk kelime
+          // 1) Satıcı linki: a[href*="/sp?seller="]
+          const sellerLink = await offerElement.$('a[href*="/sp?seller="]').catch(() => null);
+          if (sellerLink) {
+            const t = await sellerLink.textContent().then(x => x && x.trim()).catch(() => null);
+            if (t) { soldBy = t; sellerName = soldBy; }
+          }
+          // 2) "Sold by ..." metninden çıkar
+          if (!soldBy) {
+            const allText = await offerElement.textContent();
+            const soldByMatch = allText.match(/Sold by\s+([^\n\r]+?)(?:\s+Seller rating|$)/i);
+            if (soldByMatch) {
+              soldBy = soldByMatch[1].trim();
+              sellerName = soldBy;
+            }
+          }
+          // 3) Pinned değilse: tıklanan offer için sidebar #aod-offer-soldBy (getSellerInfo'da tıklama yapıldı)
+          if (!soldBy && !isPinnedOffer) {
+            const globalSoldBy = await page.$('#aod-offer-soldBy').catch(() => null);
+            if (globalSoldBy) {
+              const t = await globalSoldBy.textContent().then(x => x && x.trim()).catch(() => null);
+              if (t) {
+                const m = t.match(/Sold by\s+([^\n\r]+?)(?:\s+Seller rating|$)/i);
+                if (m) { soldBy = m[1].trim(); sellerName = soldBy; }
+                const ratingMatch = t.match(/(\d+(?:\.\d+)?)\s+out of\s+5\s+stars/i);
+                if (ratingMatch) sellerRating = parseFloat(ratingMatch[1]);
+              }
+            }
           }
         }
         
@@ -1524,6 +1543,8 @@ class PlaywrightService {
           const offer = offerElements[i];
           try {
             // Her offer için sidebar'dan bilgileri çek (index'e göre selector'lar kullanılacak)
+            await offer.click().catch(() => {});
+            await this.safeWait(page, 500);
             const sellerData = await this.extractSellerDataFromOffer(page, offer, i + 1, false);
             if (sellerData) {
               sellers.push(sellerData);
