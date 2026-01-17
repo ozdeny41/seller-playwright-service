@@ -1365,9 +1365,11 @@ class PlaywrightService {
               
               // Eğer sidebar hala açılmadıysa, doğru AOD URL'yi oluştur
               const currentUrl = page.url();
-              const baseUrl = currentUrl.split('?')[0].split('#')[0];
-              // ASIN'den AOD URL'yi oluştur
-              const aodUrl = `${baseUrl}/gp/offer-listing/${asin}/ref=dp_olp_NEW_mbc?ie=UTF8&condition=NEW`;
+              // URL'den domain'i al (https://www.amazon.com veya https://www.amazon.co.uk gibi)
+              const urlObj = new URL(currentUrl);
+              const domain = `${urlObj.protocol}//${urlObj.host}`;
+              // ASIN'den AOD URL'yi oluştur (domain + /gp/offer-listing/...)
+              const aodUrl = `${domain}/gp/offer-listing/${asin}/ref=dp_olp_NEW_mbc?ie=UTF8&condition=NEW`;
               console.log(`🔗 [Playwright] AOD URL oluşturuldu: ${aodUrl}`);
               await page.goto(aodUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
               console.log(`✅ [Playwright] AOD sayfasına gidildi (hash URL fallback)`);
