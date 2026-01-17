@@ -575,6 +575,9 @@ class PlaywrightService {
             }
           }
         }
+      } catch (e) {
+        console.warn(`⚠️ [Playwright] Offer ${index} condition çekilirken hata: ${e.message}`);
+      }
       
       // New/Used kontrolü - KRİTİK: Modal'da gösterilecek
       if (condition) {
