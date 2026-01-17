@@ -1346,9 +1346,9 @@ class PlaywrightService {
           }
           console.log(`🔗 [Playwright] href'den URL alındı: ${href}`);
           
-          // KRİTİK: Hash URL (#dynamic-aod-ingress-box) ise, JavaScript ile sidebar'ı aç
-          if (href.includes('#dynamic-aod-ingress-box')) {
-            console.log(`🔗 [Playwright] Hash URL tespit edildi, JavaScript ile sidebar açılıyor...`);
+          // KRİTİK: Hash URL (#dynamic-aod-ingress-box) ise, doğru AOD URL'yi oluştur
+          if (href.includes('#dynamic-aod-ingress-box') || href.includes('ref=dp_product_quick_view')) {
+            console.log(`🔗 [Playwright] Hash URL tespit edildi, doğru AOD URL oluşturuluyor...`);
             try {
               // Önce link'e JavaScript ile tıkla (sidebar'ı açmak için)
               await newAndUsedLink.evaluate(el => {
@@ -1362,8 +1362,17 @@ class PlaywrightService {
               });
               console.log(`✅ [Playwright] Hash URL için JavaScript event trigger edildi`);
               await this.safeWait(page, 2000); // Sidebar'ın açılması için bekle
+              
+              // Eğer sidebar hala açılmadıysa, doğru AOD URL'yi oluştur
+              const currentUrl = page.url();
+              const baseUrl = currentUrl.split('?')[0].split('#')[0];
+              // ASIN'den AOD URL'yi oluştur
+              const aodUrl = `${baseUrl}/gp/offer-listing/${asin}/ref=dp_olp_NEW_mbc?ie=UTF8&condition=NEW`;
+              console.log(`🔗 [Playwright] AOD URL oluşturuldu: ${aodUrl}`);
+              await page.goto(aodUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+              console.log(`✅ [Playwright] AOD sayfasına gidildi (hash URL fallback)`);
             } catch (jsError) {
-              console.warn(`⚠️ [Playwright] JavaScript event trigger başarısız, normal click deneniyor: ${jsError.message}`);
+              console.warn(`⚠️ [Playwright] Hash URL işleme başarısız, normal click deneniyor: ${jsError.message}`);
               // Fallback: Normal click
               await newAndUsedLink.click({ timeout: 30000 });
             }
