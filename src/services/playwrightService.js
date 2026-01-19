@@ -1630,13 +1630,36 @@ class PlaywrightService {
       }
       
       if (!newAndUsedLink) {
-        console.error(`❌ [Playwright] "New & Used" / "Other sellers" link bulunamadı - Sayfa URL: ${page.url()}`);
-        return {
-          success: false,
-          data: null,
-          error: 'New & Used / Other sellers link bulunamadı - Bu ürün için seller bilgisi yok olabilir',
-          status: 404
-        };
+        console.warn(`⚠️ [Playwright] "New & Used" / "Other sellers" link bulunamadı - Sayfa URL: ${page.url()}`);
+        console.log(`✅ [Playwright] Tek satıcılı ürün - Sadece buybox bilgileri döndürülüyor`);
+        
+        // KRİTİK: "New & Used" linki yoksa, bu ürün tek satıcılı demektir
+        // Bu durumda sadece buybox bilgilerini döndür
+        if (buyboxData) {
+          return {
+            success: true,
+            data: {
+              asin: asin,
+              sourceMarketplace: sourceMarketplace,
+              targetCountry: targetCountry,
+              totalSellers: 1, // Tek satıcı (buybox)
+              sellers: [buyboxData], // Sadece buybox satıcısı
+              marketplace: 'source',
+              buybox: buyboxData,
+              singleSeller: true // Tek satıcı olduğunu belirt
+            },
+            error: null,
+            status: 200
+          };
+        } else {
+          // Buybox bilgisi de yoksa hata döndür
+          return {
+            success: false,
+            data: null,
+            error: 'New & Used / Other sellers link bulunamadı ve buybox bilgisi çekilemedi',
+            status: 404
+          };
+        }
       }
       
       // "New & Used" linkine/div'ine tıkla
