@@ -521,12 +521,28 @@ class PlaywrightService {
       let soldBy = null;
       let shipsFrom = null;
       try {
+        // KRİTİK: Amazon'un farklı buybox yapılarını destekle
         // "Shipper / Seller" label'ından sonraki text'i al
         const merchantInfoSelectors = [
+          // Standart merchantInfo yapısı
           'div#merchantInfoFeature_feature_div div.offer-display-feature-text-message',
           'div#merchantInfoFeature_feature_div span.offer-display-feature-text-message',
           'div#merchantInfoFeature_feature_div .offer-display-feature-text-message',
-          'div#merchantInfoFeature_feature_div span.a-size-small.offer-display-feature-text-message'
+          'div#merchantInfoFeature_feature_div span.a-size-small.offer-display-feature-text-message',
+          // Alternatif selector'lar - farklı Amazon sayfa yapıları için
+          '#merchant-info',
+          '#sellerProfileTriggerId',
+          '#tabular-buybox-truncate-0 .tabular-buybox-text a',
+          '#tabular-buybox-truncate-1 .tabular-buybox-text a',
+          'div[data-feature-name="merchantInfo"] .offer-display-feature-text-message',
+          // Buybox içinde satıcı linki
+          '#buybox a[href*="/sp?seller="]',
+          '#desktop_buybox a[href*="/sp?seller="]',
+          '#qualifiedBuybox a[href*="/sp?seller="]',
+          // Sold by text
+          '#buybox-see-all-buying-choices-announce',
+          'span:has-text("Sold by") + span',
+          'span:has-text("Ships from") + span'
         ];
         
         for (const selector of merchantInfoSelectors) {
@@ -545,16 +561,57 @@ class PlaywrightService {
           }
         }
         
-        // "Ships From" bilgisi (eğer varsa)
-        try {
-          const shipsFromText = await page.textContent('div#merchantInfoFeature_feature_div').catch(() => '');
-          const shipsFromMatch = shipsFromText.match(/Ships from\s+([^\n\r]+)/i);
-          if (shipsFromMatch) {
-            shipsFrom = shipsFromMatch[1].trim();
-            console.log(`✅ [Playwright] Buybox shipsFrom çekildi: ${shipsFrom}`);
+        // KRİTİK: Eğer hala bulunamadıysa, buybox container'ından text parse et
+        if (!sellerName) {
+          try {
+            // Buybox container text'inden "Ships from" ve "Sold by" bilgilerini çek
+            const buyboxSelectors = [
+              '#desktop_buybox',
+              '#buybox',
+              '#qualifiedBuybox',
+              '#tabular-buybox'
+            ];
+            
+            for (const selector of buyboxSelectors) {
+              try {
+                const buyboxText = await page.textContent(selector).catch(() => '');
+                if (buyboxText) {
+                  // "Sold by" pattern'i
+                  const soldByMatch = buyboxText.match(/Sold by\s+([^\n\r]+?)(?:\s+Ships from|$)/i);
+                  if (soldByMatch) {
+                    sellerName = soldByMatch[1].trim();
+                    soldBy = sellerName;
+                    console.log(`✅ [Playwright] Buybox sellerName buybox text'inden çekildi: ${sellerName}`);
+                    break;
+                  }
+                  
+                  // "Ships from" ve "Sold by" ayrı ayrı
+                  const shipsFromMatch = buyboxText.match(/Ships from\s+([^\n\r]+?)(?:\s+Sold by|$)/i);
+                  if (shipsFromMatch && !shipsFrom) {
+                    shipsFrom = shipsFromMatch[1].trim();
+                  }
+                }
+              } catch (e) {
+                continue;
+              }
+            }
+          } catch (e) {
+            console.warn(`⚠️ [Playwright] Buybox text parse hatası: ${e.message}`);
           }
-        } catch (e) {
-          // Ships from bulunamadı
+        }
+        
+        // "Ships From" bilgisi (eğer varsa)
+        if (!shipsFrom) {
+          try {
+            const shipsFromText = await page.textContent('div#merchantInfoFeature_feature_div').catch(() => '');
+            const shipsFromMatch = shipsFromText.match(/Ships from\s+([^\n\r]+)/i);
+            if (shipsFromMatch) {
+              shipsFrom = shipsFromMatch[1].trim();
+              console.log(`✅ [Playwright] Buybox shipsFrom çekildi: ${shipsFrom}`);
+            }
+          } catch (e) {
+            // Ships from bulunamadı
+          }
         }
       } catch (e) {
         console.warn(`⚠️ [Playwright] Buybox sellerName çekilemedi: ${e.message}`);
@@ -610,7 +667,15 @@ class PlaywrightService {
           'div#corePrice_feature_div span.a-price span[aria-hidden="true"]',
           'div#corePrice_feature_div span.a-price .a-offscreen',
           'div#corePrice_feature_div .a-price span[aria-hidden="true"]',
-          'div#corePrice_feature_div .a-spacing-top-mini'
+          'div#corePrice_feature_div .a-spacing-top-mini',
+          // KRİTİK: Alternatif fiyat selector'ları
+          '#qualifiedBuybox span.a-price .a-offscreen',
+          '#qualifiedBuybox span.a-price span[aria-hidden="true"]',
+          '#desktop_buybox span.a-price .a-offscreen',
+          '#desktop_buybox span.a-price span[aria-hidden="true"]',
+          '#buybox span.a-price .a-offscreen',
+          'span.a-price.a-text-price span.a-offscreen',
+          '#apex_offerDisplay_desktop span.a-price .a-offscreen'
         ];
         
         for (const selector of priceSelectors) {
@@ -634,22 +699,65 @@ class PlaywrightService {
           }
         }
         
-        // Shipping & Import Charges: div#amazonGlobal_feature_div
-        try {
-          const shippingElement = await page.$('div#amazonGlobal_feature_div span.a-size-base.a-color-secondary');
-          if (shippingElement) {
-            shippingText = await shippingElement.textContent().then(t => t.trim()).catch(() => null);
-            if (shippingText) {
-              // "$94.13 Shipping & Import Charges to United Kingdom" formatından fiyatı çıkar
-              const shippingMatch = shippingText.match(/[\$£€]?\s*([\d,]+\.?\d*)/);
-              if (shippingMatch) {
-                shippingPrice = parseFloat(shippingMatch[1].replace(/,/g, ''));
-                console.log(`✅ [Playwright] Buybox shippingPrice çekildi: ${shippingText} -> ${shippingPrice}`);
+        // KRİTİK: Eğer hala fiyat bulunamadıysa, buybox içeriğinden parse et
+        if (!price) {
+          try {
+            const buyboxInnerSelectors = [
+              '#qualifiedBuybox .a-box-inner',
+              '#desktop_buybox .a-box-inner',
+              '#buybox .a-box-inner'
+            ];
+            
+            for (const selector of buyboxInnerSelectors) {
+              try {
+                const buyboxInner = await page.textContent(selector).catch(() => '');
+                if (buyboxInner) {
+                  // "$24.99" veya "$24 . 99" formatından fiyat çıkar
+                  const priceMatch = buyboxInner.match(/\$\s*([\d,]+(?:\s*\.\s*\d{2})?)/);
+                  if (priceMatch) {
+                    const cleanedPrice = priceMatch[1].replace(/\s+/g, '');
+                    price = parseFloat(cleanedPrice.replace(/,/g, ''));
+                    priceText = `$${cleanedPrice}`;
+                    console.log(`✅ [Playwright] Buybox price a-box-inner'dan çekildi: ${priceText} -> ${price}`);
+                    
+                    // Aynı içerikten shipping bilgisini de çek
+                    // "$9.42 Shipping to United Kingdom" veya "$9.42 delivery"
+                    const shippingMatch = buyboxInner.match(/\$\s*([\d,]+\.?\d*)\s*(?:Shipping|delivery)/i);
+                    if (shippingMatch && !shippingPrice) {
+                      shippingPrice = parseFloat(shippingMatch[1].replace(/,/g, ''));
+                      shippingText = shippingMatch[0];
+                      console.log(`✅ [Playwright] Buybox shippingPrice a-box-inner'dan çekildi: ${shippingPrice}`);
+                    }
+                    break;
+                  }
+                }
+              } catch (e) {
+                continue;
               }
             }
+          } catch (e) {
+            console.warn(`⚠️ [Playwright] Buybox a-box-inner parse hatası: ${e.message}`);
           }
-        } catch (e) {
-          console.warn(`⚠️ [Playwright] Buybox shippingPrice çekilemedi: ${e.message}`);
+        }
+        
+        // Shipping & Import Charges: div#amazonGlobal_feature_div
+        if (!shippingPrice) {
+          try {
+            const shippingElement = await page.$('div#amazonGlobal_feature_div span.a-size-base.a-color-secondary');
+            if (shippingElement) {
+              shippingText = await shippingElement.textContent().then(t => t.trim()).catch(() => null);
+              if (shippingText) {
+                // "$94.13 Shipping & Import Charges to United Kingdom" formatından fiyatı çıkar
+                const shippingMatch = shippingText.match(/[\$£€]?\s*([\d,]+\.?\d*)/);
+                if (shippingMatch) {
+                  shippingPrice = parseFloat(shippingMatch[1].replace(/,/g, ''));
+                  console.log(`✅ [Playwright] Buybox shippingPrice çekildi: ${shippingText} -> ${shippingPrice}`);
+                }
+              }
+            }
+          } catch (e) {
+            console.warn(`⚠️ [Playwright] Buybox shippingPrice çekilemedi: ${e.message}`);
+          }
         }
       } catch (e) {
         console.warn(`⚠️ [Playwright] Buybox price çekilemedi: ${e.message}`);
