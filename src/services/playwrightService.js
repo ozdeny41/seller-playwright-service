@@ -727,10 +727,19 @@ class PlaywrightService {
           isUsed: isUsed,
           price: price,
           priceText: priceText || (price ? `$${price.toFixed(2)}` : null),
+          // KRİTİK: Gönderim fiyatları - Ayrı field'lar olarak
           shippingPrice: shippingPrice,
+          standardShippingPrice: shippingPrice, // Standard shipping price
+          expressShippingPrice: null, // Express shipping price (buybox için genellikle yok)
           shippingText: shippingText || null,
+          // KRİTİK: Teslimat tarihleri
+          deliveryDate: standardDeliveryDate, // Geriye dönük uyumluluk
           standardDeliveryDate: standardDeliveryDate,
           expressDeliveryDate: expressDeliveryDate,
+          // KRİTİK: Satıcı değerlendirme bilgileri (buybox için genellikle yok ama field'ları ekle)
+          sellerRating: null, // Buybox'ta satıcı rating genellikle gösterilmiyor
+          sellerRatingCount: null,
+          positivePercentage: null,
           isBuybox: true,
           index: 0
         };
@@ -1010,6 +1019,8 @@ class PlaywrightService {
       let soldBy = null;
       let sellerName = null;
       let sellerRating = null;
+      let sellerRatingCount = null;
+      let positivePercentage = null;
       try {
         // KRİTİK: Önce offer element içinden soldBy'yi bul
         // "Sold by ..." metninden çıkar
@@ -1025,6 +1036,20 @@ class PlaywrightService {
         if (ratingMatch) {
           sellerRating = parseFloat(ratingMatch[1]);
           console.log(`✅ [Playwright] Offer ${index} sellerRating offer element'inden çekildi: ${sellerRating}`);
+        }
+        
+        // KRİTİK: Seller rating count - "(77 ratings)" veya "(1,234 ratings)" formatından çıkar
+        const ratingCountMatch = offerText.match(/\((\d{1,3}(?:,\d{3})*|\d+)\s*(?:ratings?|değerlendirme)\)/i);
+        if (ratingCountMatch) {
+          sellerRatingCount = ratingCountMatch[1].replace(/,/g, '');
+          console.log(`✅ [Playwright] Offer ${index} sellerRatingCount offer element'inden çekildi: ${sellerRatingCount}`);
+        }
+        
+        // KRİTİK: Positive percentage - "100% positive" veya "98% positive" formatından çıkar
+        const positiveMatch = offerText.match(/(\d+(?:\.\d+)?)\s*%\s*positive/i);
+        if (positiveMatch) {
+          positivePercentage = parseFloat(positiveMatch[1]);
+          console.log(`✅ [Playwright] Offer ${index} positivePercentage offer element'inden çekildi: ${positivePercentage}%`);
         }
         
         // Eğer bulunamadıysa, sidebar'dan soldBy çek
@@ -1054,6 +1079,24 @@ class PlaywrightService {
                       console.log(`✅ [Playwright] Offer ${index} sellerRating sidebar'dan çekildi: ${sellerRating}`);
                     }
                   }
+                  
+                  // KRİTİK: Seller rating count - "(77 ratings)" formatından çıkar
+                  if (!sellerRatingCount) {
+                    const ratingCountMatch = soldByText.match(/\((\d{1,3}(?:,\d{3})*|\d+)\s*(?:ratings?|değerlendirme)\)/i);
+                    if (ratingCountMatch) {
+                      sellerRatingCount = ratingCountMatch[1].replace(/,/g, '');
+                      console.log(`✅ [Playwright] Offer ${index} sellerRatingCount sidebar'dan çekildi: ${sellerRatingCount}`);
+                    }
+                  }
+                  
+                  // KRİTİK: Positive percentage - "100% positive" formatından çıkar
+                  if (!positivePercentage) {
+                    const positiveMatch = soldByText.match(/(\d+(?:\.\d+)?)\s*%\s*positive/i);
+                    if (positiveMatch) {
+                      positivePercentage = parseFloat(positiveMatch[1]);
+                      console.log(`✅ [Playwright] Offer ${index} positivePercentage sidebar'dan çekildi: ${positivePercentage}%`);
+                    }
+                  }
                 }
               }
             } catch (e) {
@@ -1079,6 +1122,24 @@ class PlaywrightService {
                     if (ratingMatch) {
                       sellerRating = parseFloat(ratingMatch[1]);
                       console.log(`✅ [Playwright] Offer ${index} sellerRating sidebar'dan çekildi: ${sellerRating}`);
+                    }
+                  }
+                  
+                  // KRİTİK: Seller rating count - "(77 ratings)" formatından çıkar
+                  if (!sellerRatingCount) {
+                    const ratingCountMatch = soldByText.match(/\((\d{1,3}(?:,\d{3})*|\d+)\s*(?:ratings?|değerlendirme)\)/i);
+                    if (ratingCountMatch) {
+                      sellerRatingCount = ratingCountMatch[1].replace(/,/g, '');
+                      console.log(`✅ [Playwright] Offer ${index} sellerRatingCount sidebar'dan çekildi: ${sellerRatingCount}`);
+                    }
+                  }
+                  
+                  // KRİTİK: Positive percentage - "100% positive" formatından çıkar
+                  if (!positivePercentage) {
+                    const positiveMatch = soldByText.match(/(\d+(?:\.\d+)?)\s*%\s*positive/i);
+                    if (positiveMatch) {
+                      positivePercentage = parseFloat(positiveMatch[1]);
+                      console.log(`✅ [Playwright] Offer ${index} positivePercentage sidebar'dan çekildi: ${positivePercentage}%`);
                     }
                   }
                 }
@@ -1108,6 +1169,16 @@ class PlaywrightService {
                 if (!sellerRating) {
                   const ratingMatch = t.match(/(\d+(?:\.\d+)?)\s+out of\s+5\s+stars/i);
                   if (ratingMatch) sellerRating = parseFloat(ratingMatch[1]);
+                }
+                // KRİTİK: Seller rating count
+                if (!sellerRatingCount) {
+                  const ratingCountMatch = t.match(/\((\d{1,3}(?:,\d{3})*|\d+)\s*(?:ratings?|değerlendirme)\)/i);
+                  if (ratingCountMatch) sellerRatingCount = ratingCountMatch[1].replace(/,/g, '');
+                }
+                // KRİTİK: Positive percentage
+                if (!positivePercentage) {
+                  const positiveMatch = t.match(/(\d+(?:\.\d+)?)\s*%\s*positive/i);
+                  if (positiveMatch) positivePercentage = parseFloat(positiveMatch[1]);
                 }
               }
             }
@@ -1212,10 +1283,18 @@ class PlaywrightService {
         shipsFrom: shipsFrom,
         soldBy: soldBy,
         sellerName: sellerName,
-        sellerRating: sellerRating,
-        deliveryDate: deliveryDate,
-        expressDeliveryDate: expressDeliveryDate || null, // Express delivery date (pinned offer için)
-        shippingPrice: shippingPrice
+        // KRİTİK: Satıcı değerlendirme bilgileri - Frontend modalda gösterilecek
+        sellerRating: sellerRating, // Yıldız puanı (1-5)
+        sellerRatingCount: sellerRatingCount, // Değerlendirme sayısı (örn: "77" veya "1234")
+        positivePercentage: positivePercentage, // Pozitif yüzde (örn: 100, 98)
+        // KRİTİK: Teslimat bilgileri - Ayrı field'lar olarak
+        deliveryDate: deliveryDate, // Standard delivery date (geriye dönük uyumluluk)
+        standardDeliveryDate: deliveryDate, // Standard delivery date
+        expressDeliveryDate: expressDeliveryDate || null, // Express/Fast delivery date
+        // KRİTİK: Gönderim fiyatları - Ayrı field'lar olarak
+        shippingPrice: shippingPrice, // Standard shipping price (geriye dönük uyumluluk)
+        standardShippingPrice: shippingPrice, // Standard shipping price
+        expressShippingPrice: null // Express shipping price (henüz çekilmiyor, ileride eklenebilir)
       };
     } catch (e) {
       console.error(`❌ [Playwright] Seller data extraction hatası: ${e.message}`);
