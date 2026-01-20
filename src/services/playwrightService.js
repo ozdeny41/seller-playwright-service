@@ -123,10 +123,16 @@ class PlaywrightService {
       const baseUrl = `https://${baseDomain}`;
       console.log(`🌐 [Playwright] Marketplace domain: ${baseUrl} (source: ${sourceMarketplace})`);
 
-      // "Deliver to" butonunu bul ve tıkla
+      // KRİTİK: Sayfa yüklendikten sonra ekstra bekleme (seller-playwright-service'teki gibi)
+      // Sayfa tam yüklenmesi için bekle
+      await this.safeWait(page, 3000);
+      console.log(`⏳ [Playwright] Sayfa yükleme sonrası bekleme tamamlandı, "Deliver to" butonu aranıyor...`);
+
+      // "Deliver to" butonunu bul ve tıkla - DOM Path: #nav-global-location-popover-link
+      // seller-playwright-service'teki gibi öncelikli selector'ları kullan
       console.log(`🎭 [Playwright] "Deliver to" butonu aranıyor...`);
       const deliverToSelectors = [
-        '#nav-global-location-popover-link',
+        '#nav-global-location-popover-link', // Öncelikli selector (seller-playwright-service'teki gibi)
         'a#nav-global-location-popover-link',
         'a[data-csa-c-type="button"][id*="nav-global-location"]',
         'a[id*="nav-global-location"]',
@@ -151,7 +157,7 @@ class PlaywrightService {
         throw new Error('Deliver to button not found after exhaustive search');
       }
       
-      // "Deliver to" butonuna tıkla
+      // "Deliver to" butonuna tıkla (seller-playwright-service'teki gibi)
       try {
         await deliverToButton.scrollIntoViewIfNeeded();
         await this.safeWait(page, 1000);
