@@ -555,11 +555,34 @@ class PlaywrightService {
           try {
             const element = await page.$(selector);
             if (element) {
-              sellerName = await element.textContent().then(t => t.trim()).catch(() => null);
-              soldBy = sellerName;
-              if (sellerName) {
-                console.log(`✅ [Playwright] Buybox sellerName çekildi: ${sellerName}`);
-                break;
+              const text = await element.textContent().then(t => t.trim()).catch(() => null);
+              if (text) {
+                // "Sold by X" formatından sadece X'i çıkar
+                const soldByMatch = text.match(/Sold by\s+(.+?)(?:\s+Seller rating|\s+\(|\s*$)/i);
+                if (soldByMatch) {
+                  sellerName = soldByMatch[1].trim();
+                  soldBy = sellerName;
+                } else {
+                  // Direkt satıcı adı olabilir
+                  sellerName = text;
+                  soldBy = sellerName;
+                }
+                
+                // Seller ID'yi link'ten çek (eğer element bir link ise)
+                if (element && (await element.evaluate(el => el.tagName.toLowerCase()) === 'a')) {
+                  const href = await element.getAttribute('href').catch(() => '');
+                  if (href) {
+                    const sellerIdMatch = href.match(/seller=([A-Z0-9]+)/i);
+                    if (sellerIdMatch) {
+                      // sellerId field'ı yoksa eklenebilir
+                    }
+                  }
+                }
+                
+                if (sellerName) {
+                  console.log(`✅ [Playwright] Buybox sellerName çekildi: ${sellerName}`);
+                  break;
+                }
               }
             }
           } catch (e) {
@@ -830,6 +853,51 @@ class PlaywrightService {
         console.warn(`⚠️ [Playwright] Buybox delivery dates çekilemedi: ${e.message}`);
       }
       
+      // KRİTİK: Fulfillment Type hesapla (FBA/FBM/SBA)
+      // Mantık:
+      // - Amazon satıp Amazon gönderiyorsa → SBA
+      // - 3. parti satıcı satıp Amazon kargo yapıyorsa → FBA
+      // - 3. parti satıcı satıp 3. parti satıcı gönderiyorsa → FBM
+      let fulfillmentType = 'FBM'; // Default
+      let isFBA = false;
+      let isFBM = true; // Default
+      let isSBA = false;
+      
+      try {
+        const soldByLower = (soldBy || sellerName || '').toLowerCase().trim();
+        const shipsFromLower = (shipsFrom || '').toLowerCase().trim();
+        
+        const isAmazonSeller = soldByLower.includes('amazon') || soldByLower === 'amazon.com' || soldByLower === 'amazon' || soldByLower === '';
+        const isAmazonShipping = shipsFromLower.includes('amazon') || shipsFromLower === 'amazon.com' || shipsFromLower === 'amazon' || shipsFromLower === '';
+        
+        if (isAmazonSeller && isAmazonShipping) {
+          fulfillmentType = 'SBA';
+          isSBA = true;
+          isFBA = false;
+          isFBM = false;
+          console.log(`✅ [Playwright] Buybox Fulfillment Type: SBA (Amazon satıyor, Amazon gönderiyor)`);
+        } else if (!isAmazonSeller && isAmazonShipping) {
+          fulfillmentType = 'FBA';
+          isSBA = false;
+          isFBA = true;
+          isFBM = false;
+          console.log(`✅ [Playwright] Buybox Fulfillment Type: FBA (3. parti satıcı satıyor, Amazon gönderiyor)`);
+        } else {
+          fulfillmentType = 'FBM';
+          isSBA = false;
+          isFBA = false;
+          isFBM = true;
+          console.log(`✅ [Playwright] Buybox Fulfillment Type: FBM (3. parti satıcı satıyor, 3. parti satıcı gönderiyor)`);
+        }
+      } catch (e) {
+        console.warn(`⚠️ [Playwright] Buybox Fulfillment type hesaplanamadı: ${e.message}`);
+        // Default: FBM
+        fulfillmentType = 'FBM';
+        isFBM = true;
+        isFBA = false;
+        isSBA = false;
+      }
+      
       // Buybox objesi oluştur
       if (sellerName || price) {
         return {
@@ -841,6 +909,11 @@ class PlaywrightService {
           isUsed: isUsed,
           price: price,
           priceText: priceText || (price ? `$${price.toFixed(2)}` : null),
+          // KRİTİK: Fulfillment Type (FBA/FBM/SBA)
+          fulfillmentType: fulfillmentType,
+          isFBA: isFBA,
+          isFBM: isFBM,
+          isSBA: isSBA,
           // KRİTİK: Gönderim fiyatları - Ayrı field'lar olarak
           shippingPrice: shippingPrice,
           standardShippingPrice: shippingPrice, // Standard shipping price
@@ -1265,10 +1338,64 @@ class PlaywrightService {
           
           // Eğer hala bulunamadıysa, satıcı linki: a[href*="/sp?seller="]
           if (!soldBy) {
-            const sellerLink = await offerElement.$('a[href*="/sp?seller="]').catch(() => null);
-            if (sellerLink) {
-              const t = await sellerLink.textContent().then(x => x && x.trim()).catch(() => null);
-              if (t) { soldBy = t; sellerName = soldBy; }
+            const sellerLinkSelectors = [
+              'a[href*="/sp?seller="]',
+              'a#sellerProfileTriggerId',
+              'a[href*="seller"]',
+              '.aod-information-block a[href*="seller"]'
+            ];
+            
+            for (const selector of sellerLinkSelectors) {
+              try {
+                const sellerLink = await offerElement.$(selector).catch(() => null);
+                if (sellerLink) {
+                  const t = await sellerLink.textContent().then(x => x && x.trim()).catch(() => null);
+                  if (t) {
+                    // "Sold by X" formatından sadece X'i çıkar
+                    const soldByMatch = t.match(/Sold by\s+(.+?)(?:\s+Seller rating|\s*$)/i);
+                    if (soldByMatch) {
+                      soldBy = soldByMatch[1].trim();
+                      sellerName = soldBy;
+                    } else {
+                      soldBy = t;
+                      sellerName = soldBy;
+                    }
+                    
+                    // Seller ID'yi link'ten çek
+                    const href = await sellerLink.getAttribute('href').catch(() => '');
+                    if (href) {
+                      const sellerIdMatch = href.match(/seller=([A-Z0-9]+)/i);
+                      if (sellerIdMatch) {
+                        // sellerId field'ı yoksa eklenebilir
+                      }
+                    }
+                    
+                    if (soldBy) {
+                      console.log(`✅ [Playwright] Offer ${index} soldBy link'ten çekildi: ${soldBy}`);
+                      break;
+                    }
+                  }
+                }
+              } catch (e) {
+                continue;
+              }
+            }
+          }
+          
+          // Eğer hala bulunamadıysa, tüm offer text'inden ara
+          if (!soldBy) {
+            try {
+              const fullText = await offerElement.textContent().catch(() => '');
+              if (fullText) {
+                const soldByMatch = fullText.match(/Sold by\s+([^\n\r]+?)(?:\s+Ships from|\s+Seller rating|\s*$)/i);
+                if (soldByMatch) {
+                  soldBy = soldByMatch[1].trim();
+                  sellerName = soldBy;
+                  console.log(`✅ [Playwright] Offer ${index} soldBy full text'ten çekildi: ${soldBy}`);
+                }
+              }
+            } catch (e) {
+              // Full text parse başarısız
             }
           }
           
@@ -1387,6 +1514,51 @@ class PlaywrightService {
         console.warn(`⚠️ [Playwright] Offer ${index} delivery bilgisi çekilirken hata: ${e.message}`);
       }
       
+      // KRİTİK: Fulfillment Type hesapla (FBA/FBM/SBA)
+      // Mantık:
+      // - Amazon satıp Amazon gönderiyorsa → SBA
+      // - 3. parti satıcı satıp Amazon kargo yapıyorsa → FBA
+      // - 3. parti satıcı satıp 3. parti satıcı gönderiyorsa → FBM
+      let fulfillmentType = 'FBM'; // Default
+      let isFBA = false;
+      let isFBM = true; // Default
+      let isSBA = false;
+      
+      try {
+        const soldByLower = (soldBy || sellerName || '').toLowerCase().trim();
+        const shipsFromLower = (shipsFrom || '').toLowerCase().trim();
+        
+        const isAmazonSeller = soldByLower.includes('amazon') || soldByLower === 'amazon.com' || soldByLower === 'amazon' || soldByLower === '';
+        const isAmazonShipping = shipsFromLower.includes('amazon') || shipsFromLower === 'amazon.com' || shipsFromLower === 'amazon' || shipsFromLower === '';
+        
+        if (isAmazonSeller && isAmazonShipping) {
+          fulfillmentType = 'SBA';
+          isSBA = true;
+          isFBA = false;
+          isFBM = false;
+          console.log(`✅ [Playwright] Offer ${index} Fulfillment Type: SBA (Amazon satıyor, Amazon gönderiyor)`);
+        } else if (!isAmazonSeller && isAmazonShipping) {
+          fulfillmentType = 'FBA';
+          isSBA = false;
+          isFBA = true;
+          isFBM = false;
+          console.log(`✅ [Playwright] Offer ${index} Fulfillment Type: FBA (3. parti satıcı satıyor, Amazon gönderiyor)`);
+        } else {
+          fulfillmentType = 'FBM';
+          isSBA = false;
+          isFBA = false;
+          isFBM = true;
+          console.log(`✅ [Playwright] Offer ${index} Fulfillment Type: FBM (3. parti satıcı satıyor, 3. parti satıcı gönderiyor)`);
+        }
+      } catch (e) {
+        console.warn(`⚠️ [Playwright] Offer ${index} Fulfillment type hesaplanamadı: ${e.message}`);
+        // Default: FBM
+        fulfillmentType = 'FBM';
+        isFBM = true;
+        isFBA = false;
+        isSBA = false;
+      }
+      
       return {
         index: index,
         condition: condition,
@@ -1397,6 +1569,11 @@ class PlaywrightService {
         shipsFrom: shipsFrom,
         soldBy: soldBy,
         sellerName: sellerName,
+        // KRİTİK: Fulfillment Type (FBA/FBM/SBA)
+        fulfillmentType: fulfillmentType,
+        isFBA: isFBA,
+        isFBM: isFBM,
+        isSBA: isSBA,
         // KRİTİK: Satıcı değerlendirme bilgileri - Frontend modalda gösterilecek
         sellerRating: sellerRating, // Yıldız puanı (1-5)
         sellerRatingCount: sellerRatingCount, // Değerlendirme sayısı (örn: "77" veya "1234")
