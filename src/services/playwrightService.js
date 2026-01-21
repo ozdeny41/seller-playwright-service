@@ -834,6 +834,35 @@ class PlaywrightService {
           }
         }
         
+        // KRİTİK: "Shipper / Seller" label kontrolü - Eğer bu label varsa, seller bilgisini çek
+        if (!sellerName) {
+          try {
+            // "Shipper / Seller" label'ını kontrol et
+            const shipperSellerLabel = await page.$('div#merchantInfoFeature_feature_div span.a-size-small.a-color-tertiary:has-text("Shipper / Seller")');
+            if (shipperSellerLabel) {
+              console.log(`✅ [Playwright] "Shipper / Seller" label bulundu`);
+              
+              // "Shipper / Seller" label'ından sonraki text'i al
+              const shipperSellerText = await page.$eval('div#merchantInfoFeature_feature_div', (div) => {
+                const label = div.querySelector('span.a-size-small.a-color-tertiary');
+                if (label && label.textContent.includes('Shipper / Seller')) {
+                  const textElement = div.querySelector('div.offer-display-feature-text-message, span.offer-display-feature-text-message, a#sellerProfileTriggerId');
+                  return textElement ? textElement.textContent.trim() : null;
+                }
+                return null;
+              }).catch(() => null);
+              
+              if (shipperSellerText) {
+                sellerName = shipperSellerText;
+                soldBy = shipperSellerText;
+                console.log(`✅ [Playwright] "Shipper / Seller" text'inden sellerName çekildi: ${sellerName}`);
+              }
+            }
+          } catch (e) {
+            console.warn(`⚠️ [Playwright] "Shipper / Seller" kontrolü hatası: ${e.message}`);
+          }
+        }
+        
         // KRİTİK: Eğer hala bulunamadıysa, buybox container'ından text parse et
         if (!sellerName) {
           try {
@@ -1121,9 +1150,12 @@ class PlaywrightService {
       let standardDeliveryDate = null;
       let expressDeliveryDate = null;
       try {
-        // Standard delivery: div#mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE_LARGE > span > span.a-text-bold
+        // Standard delivery: div#mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE_LARGE > span
+        // KRİTİK: data-csa-c-delivery-time attribute'undan tarih aralığı çekilebilir (örn: "February 9 - 19")
         console.log(`🔍 [Playwright] Standart gönderim tarihi aranıyor...`);
         const standardDeliverySelectors = [
+          'span[data-csa-c-delivery-time]', // Öncelikli - attribute'dan direkt çek (tarih aralığı dahil)
+          '#mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE_LARGE span[data-csa-c-delivery-time]',
           '#mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE_LARGE span.a-text-bold',
           '#mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE_LARGE span span.a-text-bold',
           '#mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE_LARGE',
@@ -1142,9 +1174,25 @@ class PlaywrightService {
           try {
             const element = await page.$(selector);
             if (element) {
+              // KRİTİK: Önce data-csa-c-delivery-time attribute'undan tarih aralığını çek
+              const deliveryTimeAttr = await element.getAttribute('data-csa-c-delivery-time');
+              if (deliveryTimeAttr) {
+                standardDeliveryDate = deliveryTimeAttr.trim();
+                console.log(`✅ [Playwright] Standart gönderim tarihi bulundu (attribute): ${standardDeliveryDate} (selector: ${selector})`);
+                break;
+              }
+              
               const isVisible = await element.isVisible().catch(() => false);
               const dateText = await element.textContent().then(t => t.trim()).catch(() => null);
               if (dateText) {
+                // KRİTİK: Tarih aralığı formatını kontrol et (örn: "February 9 - 19")
+                const dateRangeMatch = dateText.match(/((?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2}\s*-\s*\d{1,2})/i);
+                if (dateRangeMatch) {
+                  standardDeliveryDate = dateRangeMatch[1].trim();
+                  console.log(`✅ [Playwright] Standart gönderim tarihi bulundu (tarih aralığı): ${standardDeliveryDate} (selector: ${selector})`);
+                  break;
+                }
+                
                 // Tarih formatını kontrol et (Monday, Tuesday, vb. içermeli)
                 const dateMatch = dateText.match(/((?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),?\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2})/i);
                 if (dateMatch) {
@@ -1175,6 +1223,14 @@ class PlaywrightService {
                 if (deliveryElement) {
                   const deliveryText = await deliveryElement.textContent();
                   if (deliveryText) {
+                    // KRİTİK: Tarih aralığı formatını kontrol et (örn: "February 9 - 19")
+                    const dateRangeMatch = deliveryText.match(/((?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2}\s*-\s*\d{1,2})/i);
+                    if (dateRangeMatch) {
+                      standardDeliveryDate = dateRangeMatch[1].trim();
+                      console.log(`✅ [Playwright] Standart gönderim tarihi bulundu (delivery block text - tarih aralığı): ${standardDeliveryDate}`);
+                      break;
+                    }
+                    
                     const dateMatch = deliveryText.match(/((?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),?\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2})/i);
                     if (dateMatch) {
                       standardDeliveryDate = dateMatch[1].trim();
@@ -1192,11 +1248,13 @@ class PlaywrightService {
           }
         }
         
-        // Express delivery: div#mir-layout-DELIVERY_BLOCK-slot-SECONDARY_DELIVERY_MESSAGE_LARGE > span
+        // Express delivery: div#mir-layout-DELIVERY_BLOCK-slot-SECONDARY_DELIVERY_MESSAGE_LARGE
+        // KRİTİK: "Or fastest delivery February 2 - 4" formatını destekle
         console.log(`🔍 [Playwright] Express delivery bilgisi aranıyor...`);
         const expressDeliverySelectors = [
-          'span[data-csa-c-delivery-time]', // Öncelikli - attribute'dan direkt çek
-          '#mir-layout-DELIVERY_BLOCK-slot-SECONDARY_DELIVERY_MESSAGE_LARGE',
+          '#mir-layout-DELIVERY_BLOCK-slot-SECONDARY_DELIVERY_MESSAGE_LARGE', // Öncelikli - div içinde text var
+          '#mir-layout-DELIVERY_BLOCK-slot-SECONDARY_DELIVERY_MESSAGE_LARGE span[data-csa-c-delivery-time]',
+          'span[data-csa-c-delivery-time]', // Attribute'dan direkt çek
           '#mir-layout-DELIVERY_BLOCK-slot-SECONDARY_DELIVERY_MESSAGE_LARGE span',
           'span[data-csa-c-delivery-type="delivery"]',
           '#deliveryBlockMessage span[data-csa-c-delivery-time]',
@@ -1212,7 +1270,7 @@ class PlaywrightService {
           try {
             const element = await page.$(selector);
             if (element) {
-              // KRİTİK: Önce data-csa-c-delivery-time attribute'undan tarihi çek
+              // KRİTİK: Önce data-csa-c-delivery-time attribute'undan tarihi çek (tarih aralığı dahil)
               const deliveryTimeAttr = await element.getAttribute('data-csa-c-delivery-time');
               if (deliveryTimeAttr) {
                 expressDeliveryDate = deliveryTimeAttr.trim();
@@ -1227,11 +1285,18 @@ class PlaywrightService {
                 
                 // Eğer attribute'dan tarih gelmediyse, text'ten çıkar
                 if (!expressDeliveryDate) {
-                  // "Or fastest delivery Friday, January 23" formatından tarih çıkar
-                  const dateMatch = dateText.match(/((?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),?\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2})/i);
-                  if (dateMatch) {
-                    expressDeliveryDate = dateMatch[1].trim();
-                    console.log(`✅ [Playwright] Hızlı gönderim tarihi (text): ${expressDeliveryDate}`);
+                  // KRİTİK: Tarih aralığı formatını kontrol et (örn: "Or fastest delivery February 2 - 4")
+                  const dateRangeMatch = dateText.match(/(?:fastest|Or fastest).*?((?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2}\s*-\s*\d{1,2})/i);
+                  if (dateRangeMatch) {
+                    expressDeliveryDate = dateRangeMatch[1].trim();
+                    console.log(`✅ [Playwright] Hızlı gönderim tarihi (tarih aralığı): ${expressDeliveryDate}`);
+                  } else {
+                    // "Or fastest delivery Friday, January 23" formatından tarih çıkar
+                    const dateMatch = dateText.match(/((?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),?\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2})/i);
+                    if (dateMatch) {
+                      expressDeliveryDate = dateMatch[1].trim();
+                      console.log(`✅ [Playwright] Hızlı gönderim tarihi (text): ${expressDeliveryDate}`);
+                    }
                   }
                 }
                 
@@ -1256,21 +1321,28 @@ class PlaywrightService {
                 if (deliveryElement) {
                   const deliveryText = await deliveryElement.textContent();
                   if (deliveryText) {
-                    // "fastest" veya "Or fastest" içeren kısmı bul
-                    const fastestMatch = deliveryText.match(/([^.]*(?:fastest|Or fastest)[^.]*)/i);
-                    if (fastestMatch) {
-                      fastestDeliveryText = fastestMatch[1].trim();
-                      console.log(`✅ [Playwright] Fastest delivery text bulundu (delivery block): ${fastestDeliveryText}`);
-                      
-                      // Tarih çıkar
-                      const dateMatch = fastestDeliveryText.match(/((?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),?\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2})/i);
-                      if (dateMatch) {
-                        expressDeliveryDate = dateMatch[1].trim();
-                        console.log(`✅ [Playwright] Express delivery tarihi bulundu (delivery block): ${expressDeliveryDate}`);
+                      // "fastest" veya "Or fastest" içeren kısmı bul
+                      const fastestMatch = deliveryText.match(/([^.]*(?:fastest|Or fastest)[^.]*)/i);
+                      if (fastestMatch) {
+                        fastestDeliveryText = fastestMatch[1].trim();
+                        console.log(`✅ [Playwright] Fastest delivery text bulundu (delivery block): ${fastestDeliveryText}`);
+                        
+                        // KRİTİK: Tarih aralığı formatını kontrol et (örn: "Or fastest delivery February 2 - 4")
+                        const dateRangeMatch = fastestDeliveryText.match(/((?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2}\s*-\s*\d{1,2})/i);
+                        if (dateRangeMatch) {
+                          expressDeliveryDate = dateRangeMatch[1].trim();
+                          console.log(`✅ [Playwright] Express delivery tarihi bulundu (delivery block - tarih aralığı): ${expressDeliveryDate}`);
+                        } else {
+                          // Tarih çıkar
+                          const dateMatch = fastestDeliveryText.match(/((?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),?\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2})/i);
+                          if (dateMatch) {
+                            expressDeliveryDate = dateMatch[1].trim();
+                            console.log(`✅ [Playwright] Express delivery tarihi bulundu (delivery block): ${expressDeliveryDate}`);
+                          }
+                        }
+                        
+                        break;
                       }
-                      
-                      break;
-                    }
                   }
                 }
               } catch (e) {
@@ -1290,19 +1362,39 @@ class PlaywrightService {
       // - Amazon satıp Amazon gönderiyorsa → SBA
       // - 3. parti satıcı satıp Amazon kargo yapıyorsa → FBA
       // - 3. parti satıcı satıp 3. parti satıcı gönderiyorsa → FBM
+      // KRİTİK: "Shipper / Seller" label'ı varsa ve seller Amazon değilse → FBM
       let fulfillmentType = 'FBM'; // Default
       let isFBA = false;
       let isFBM = true; // Default
       let isSBA = false;
       
       try {
+        // KRİTİK: "Shipper / Seller" label kontrolü
+        let hasShipperSellerLabel = false;
+        try {
+          const shipperSellerLabel = await page.$('div#merchantInfoFeature_feature_div span.a-size-small.a-color-tertiary:has-text("Shipper / Seller")');
+          if (shipperSellerLabel) {
+            hasShipperSellerLabel = true;
+            console.log(`✅ [Playwright] "Shipper / Seller" label tespit edildi`);
+          }
+        } catch (e) {
+          // Label kontrolü başarısız, devam et
+        }
+        
         const soldByLower = (soldBy || sellerName || '').toLowerCase().trim();
         const shipsFromLower = (shipsFrom || '').toLowerCase().trim();
         
         const isAmazonSeller = soldByLower.includes('amazon') || soldByLower === 'amazon.com' || soldByLower === 'amazon' || soldByLower === '';
         const isAmazonShipping = shipsFromLower.includes('amazon') || shipsFromLower === 'amazon.com' || shipsFromLower === 'amazon' || shipsFromLower === '';
         
-        if (isAmazonSeller && isAmazonShipping) {
+        // KRİTİK: "Shipper / Seller" label'ı varsa ve seller Amazon değilse → FBM
+        if (hasShipperSellerLabel && !isAmazonSeller && sellerName) {
+          fulfillmentType = 'FBM';
+          isSBA = false;
+          isFBA = false;
+          isFBM = true;
+          console.log(`✅ [Playwright] Buybox Fulfillment Type: FBM ("Shipper / Seller" label var ve seller 3. parti: ${sellerName})`);
+        } else if (isAmazonSeller && isAmazonShipping) {
           fulfillmentType = 'SBA';
           isSBA = true;
           isFBA = false;
@@ -1353,19 +1445,33 @@ class PlaywrightService {
                   
                   // Delivery date ara
                   if (!standardDeliveryDate) {
-                    const dateMatch = containerText.match(/((?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),?\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2})/i);
-                    if (dateMatch) {
-                      standardDeliveryDate = dateMatch[1].trim();
-                      console.log(`✅ [Playwright] Delivery date buybox container'dan bulundu: ${standardDeliveryDate}`);
+                    // KRİTİK: Tarih aralığı formatını kontrol et (örn: "February 9 - 19")
+                    const dateRangeMatch = containerText.match(/((?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2}\s*-\s*\d{1,2})/i);
+                    if (dateRangeMatch) {
+                      standardDeliveryDate = dateRangeMatch[1].trim();
+                      console.log(`✅ [Playwright] Delivery date buybox container'dan bulundu (tarih aralığı): ${standardDeliveryDate}`);
+                    } else {
+                      const dateMatch = containerText.match(/((?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),?\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2})/i);
+                      if (dateMatch) {
+                        standardDeliveryDate = dateMatch[1].trim();
+                        console.log(`✅ [Playwright] Delivery date buybox container'dan bulundu: ${standardDeliveryDate}`);
+                      }
                     }
                   }
                   
                   // Express delivery ara
                   if (!expressDeliveryDate) {
-                    const expressMatch = containerText.match(/(?:fastest|Or fastest).*?((?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),?\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2})/i);
-                    if (expressMatch) {
-                      expressDeliveryDate = expressMatch[1].trim();
-                      console.log(`✅ [Playwright] Express delivery date buybox container'dan bulundu: ${expressDeliveryDate}`);
+                    // KRİTİK: Tarih aralığı formatını kontrol et (örn: "Or fastest delivery February 2 - 4")
+                    const expressRangeMatch = containerText.match(/(?:fastest|Or fastest).*?((?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2}\s*-\s*\d{1,2})/i);
+                    if (expressRangeMatch) {
+                      expressDeliveryDate = expressRangeMatch[1].trim();
+                      console.log(`✅ [Playwright] Express delivery date buybox container'dan bulundu (tarih aralığı): ${expressDeliveryDate}`);
+                    } else {
+                      const expressMatch = containerText.match(/(?:fastest|Or fastest).*?((?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),?\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2})/i);
+                      if (expressMatch) {
+                        expressDeliveryDate = expressMatch[1].trim();
+                        console.log(`✅ [Playwright] Express delivery date buybox container'dan bulundu: ${expressDeliveryDate}`);
+                      }
                     }
                   }
                   
