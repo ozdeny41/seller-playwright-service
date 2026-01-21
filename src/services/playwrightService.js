@@ -1248,15 +1248,17 @@ class PlaywrightService {
           }
         }
         
-        // Express delivery: div#mir-layout-DELIVERY_BLOCK-slot-SECONDARY_DELIVERY_MESSAGE_LARGE
+        // Express delivery: div#mir-layout-DELIVERY_BLOCK-slot-SECONDARY_DELIVERY_MESSAGE_LARGE > span
         // KRİTİK: "Or fastest delivery February 2 - 4" formatını destekle
+        // DOM Path: div#mir-layout-DELIVERY_BLOCK-slot-SECONDARY_DELIVERY_MESSAGE_LARGE > span[data-csa-c-delivery-time="February 2 - 4"]
         console.log(`🔍 [Playwright] Express delivery bilgisi aranıyor...`);
         const expressDeliverySelectors = [
-          '#mir-layout-DELIVERY_BLOCK-slot-SECONDARY_DELIVERY_MESSAGE_LARGE', // Öncelikli - div içinde text var
-          '#mir-layout-DELIVERY_BLOCK-slot-SECONDARY_DELIVERY_MESSAGE_LARGE span[data-csa-c-delivery-time]',
-          'span[data-csa-c-delivery-time]', // Attribute'dan direkt çek
-          '#mir-layout-DELIVERY_BLOCK-slot-SECONDARY_DELIVERY_MESSAGE_LARGE span',
-          'span[data-csa-c-delivery-type="delivery"]',
+          '#mir-layout-DELIVERY_BLOCK-slot-SECONDARY_DELIVERY_MESSAGE_LARGE span[data-csa-c-delivery-time]', // Öncelikli - span içinde attribute var
+          '#mir-layout-DELIVERY_BLOCK-slot-SECONDARY_DELIVERY_MESSAGE_LARGE > span[data-csa-c-delivery-time]', // Direct child
+          '#mir-layout-DELIVERY_BLOCK-slot-SECONDARY_DELIVERY_MESSAGE_LARGE span', // Div içindeki span
+          '#mir-layout-DELIVERY_BLOCK-slot-SECONDARY_DELIVERY_MESSAGE_LARGE', // Div içinde text var
+          'span[data-csa-c-delivery-time]', // Attribute'dan direkt çek (fallback)
+          'span[data-csa-c-delivery-type="delivery"][data-csa-c-delivery-time]', // Delivery type ile birlikte
           '#deliveryBlockMessage span[data-csa-c-delivery-time]',
           '#deliveryBlockContainer span[data-csa-c-delivery-time]',
           'span:has-text("fastest delivery")',
@@ -1274,14 +1276,14 @@ class PlaywrightService {
               const deliveryTimeAttr = await element.getAttribute('data-csa-c-delivery-time');
               if (deliveryTimeAttr) {
                 expressDeliveryDate = deliveryTimeAttr.trim();
-                console.log(`✅ [Playwright] Express delivery tarihi (attribute): ${expressDeliveryDate}`);
+                console.log(`✅ [Playwright] Express delivery tarihi (attribute): ${expressDeliveryDate} (selector: ${selector})`);
               }
               
               // Text içeriğini de al
               const dateText = await element.textContent().then(t => t.trim()).catch(() => null);
               if (dateText) {
                 fastestDeliveryText = dateText;
-                console.log(`✅ [Playwright] Fastest delivery text bulundu: ${fastestDeliveryText}`);
+                console.log(`✅ [Playwright] Fastest delivery text bulundu: ${fastestDeliveryText} (selector: ${selector})`);
                 
                 // Eğer attribute'dan tarih gelmediyse, text'ten çıkar
                 if (!expressDeliveryDate) {
@@ -1307,6 +1309,48 @@ class PlaywrightService {
             }
           } catch (e) {
             continue;
+          }
+        }
+        
+        // KRİTİK: Eğer SECONDARY_DELIVERY_MESSAGE_LARGE div'i bulundu ama span bulunamadıysa, div içindeki tüm span'leri kontrol et
+        if (!expressDeliveryDate && !fastestDeliveryText) {
+          try {
+            const secondaryDiv = await page.$('#mir-layout-DELIVERY_BLOCK-slot-SECONDARY_DELIVERY_MESSAGE_LARGE');
+            if (secondaryDiv) {
+              console.log(`🔍 [Playwright] SECONDARY_DELIVERY_MESSAGE_LARGE div bulundu, içindeki span'ler kontrol ediliyor...`);
+              const spans = await secondaryDiv.$$('span');
+              for (const span of spans) {
+                try {
+                  const deliveryTimeAttr = await span.getAttribute('data-csa-c-delivery-time');
+                  if (deliveryTimeAttr) {
+                    expressDeliveryDate = deliveryTimeAttr.trim();
+                    console.log(`✅ [Playwright] Express delivery tarihi (div içindeki span attribute): ${expressDeliveryDate}`);
+                  }
+                  
+                  const dateText = await span.textContent().then(t => t.trim()).catch(() => null);
+                  if (dateText && (dateText.includes('fastest') || dateText.includes('February') || dateText.includes('January') || dateText.includes('March'))) {
+                    fastestDeliveryText = dateText;
+                    console.log(`✅ [Playwright] Fastest delivery text bulundu (div içindeki span): ${fastestDeliveryText}`);
+                    
+                    if (!expressDeliveryDate) {
+                      const dateRangeMatch = dateText.match(/((?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2}\s*-\s*\d{1,2})/i);
+                      if (dateRangeMatch) {
+                        expressDeliveryDate = dateRangeMatch[1].trim();
+                        console.log(`✅ [Playwright] Hızlı gönderim tarihi (div içindeki span - tarih aralığı): ${expressDeliveryDate}`);
+                      }
+                    }
+                    
+                    if (expressDeliveryDate || fastestDeliveryText) {
+                      break;
+                    }
+                  }
+                } catch (e) {
+                  continue;
+                }
+              }
+            }
+          } catch (e) {
+            console.warn(`⚠️ [Playwright] SECONDARY_DELIVERY_MESSAGE_LARGE div kontrolü hatası: ${e.message}`);
           }
         }
         
