@@ -144,18 +144,51 @@ class PlaywrightService {
       await this.safeWait(page, 3000);
       
       // KRİTİK: Sayfa title'ını kontrol et - eğer "Amazon.com" ise sayfa tam yüklenmemiş olabilir
-      const pageTitle = await page.title().catch(() => '');
-      if (pageTitle === 'Amazon.com' || pageTitle === 'Amazon' || !pageTitle) {
-        console.warn(`⚠️ [Playwright] Sayfa title sadece "Amazon.com" - sayfa tam yüklenmemiş olabilir, ekstra bekleme...`);
+      let pageTitle = await page.title().catch(() => '');
+      let retryCount = 0;
+      const maxTitleRetries = 3;
+      
+      while ((pageTitle === 'Amazon.com' || pageTitle === 'Amazon' || !pageTitle) && retryCount < maxTitleRetries) {
+        console.warn(`⚠️ [Playwright] Sayfa title sadece "Amazon.com" (retry ${retryCount + 1}/${maxTitleRetries}) - sayfa tam yüklenmemiş olabilir, ekstra bekleme...`);
         await this.safeWait(page, 5000);
         
         // Sayfayı yeniden yükle
         try {
           await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
           await this.safeWait(page, 5000);
-          console.log(`✅ [Playwright] Sayfa yeniden yüklendi`);
+          console.log(`✅ [Playwright] Sayfa yeniden yüklendi (retry ${retryCount + 1})`);
+          
+          // Title'ı tekrar kontrol et
+          pageTitle = await page.title().catch(() => '');
+          if (pageTitle !== 'Amazon.com' && pageTitle !== 'Amazon' && pageTitle) {
+            console.log(`✅ [Playwright] Sayfa title düzeldi: "${pageTitle}"`);
+            break;
+          }
         } catch (reloadError) {
           console.warn(`⚠️ [Playwright] Sayfa reload hatası: ${reloadError.message}`);
+        }
+        
+        retryCount++;
+      }
+      
+      // KRİTİK: Eğer hala title "Amazon.com" ise, sayfanın tam yüklenmesi için ekstra bekleme
+      if (pageTitle === 'Amazon.com' || pageTitle === 'Amazon' || !pageTitle) {
+        console.warn(`⚠️ [Playwright] Sayfa title hala "Amazon.com" - sayfa tam yüklenmemiş olabilir, ekstra bekleme ve scroll...`);
+        await this.safeWait(page, 10000);
+        
+        // Sayfayı scroll et - navbar'ın yüklenmesi için
+        try {
+          await page.evaluate(() => {
+            window.scrollTo(0, 0);
+          });
+          await this.safeWait(page, 2000);
+          await page.evaluate(() => {
+            window.scrollTo(0, 100);
+          });
+          await this.safeWait(page, 2000);
+          console.log(`✅ [Playwright] Sayfa scroll edildi (navbar yüklenmesi için)`);
+        } catch (scrollError) {
+          console.warn(`⚠️ [Playwright] Scroll hatası: ${scrollError.message}`);
         }
       }
       
@@ -208,9 +241,21 @@ class PlaywrightService {
       // Eğer hala bulunamadıysa, waitForSelector ile bekle
       if (!deliverToButton) {
         console.log(`⏳ [Playwright] "Deliver to" butonu hemen bulunamadı, bekleniyor...`);
+        
+        // KRİTİK: Sayfayı scroll et - navbar'ın görünür olması için
+        try {
+          await page.evaluate(() => {
+            window.scrollTo(0, 0);
+          });
+          await this.safeWait(page, 2000);
+          console.log(`✅ [Playwright] Sayfa scroll edildi (navbar görünürlüğü için)`);
+        } catch (scrollError) {
+          console.warn(`⚠️ [Playwright] Scroll hatası: ${scrollError.message}`);
+        }
+        
         for (const selector of deliverToSelectors.slice(0, 5)) { // İlk 5 selector'ı bekle
           try {
-            await page.waitForSelector(selector, { timeout: 15000, state: 'attached' });
+            await page.waitForSelector(selector, { timeout: 20000, state: 'attached' });
             deliverToButton = await page.$(selector);
             if (deliverToButton) {
               foundSelector = selector;
@@ -220,6 +265,42 @@ class PlaywrightService {
           } catch (e) {
             continue;
           }
+        }
+      }
+      
+      // KRİTİK: Eğer hala bulunamadıysa, sayfanın tam yüklenmesi için ekstra bekleme ve tekrar dene
+      if (!deliverToButton) {
+        console.log(`⏳ [Playwright] "Deliver to" butonu hala bulunamadı, sayfa tam yüklenmesi için ekstra bekleme...`);
+        await this.safeWait(page, 10000);
+        
+        // Sayfayı scroll et ve tekrar ara
+        try {
+          await page.evaluate(() => {
+            window.scrollTo(0, 0);
+            // Navbar'ın yüklenmesi için biraz bekle
+            return new Promise(resolve => setTimeout(resolve, 2000));
+          });
+          await this.safeWait(page, 3000);
+          
+          // Tüm selector'ları tekrar dene
+          for (const selector of deliverToSelectors) {
+            try {
+              const element = await page.$(selector);
+              if (element) {
+                const isVisible = await element.isVisible().catch(() => false);
+                if (isVisible || !deliverToButton) {
+                  deliverToButton = element;
+                  foundSelector = selector;
+                  console.log(`✅ [Playwright] "Deliver to" butonu ekstra bekleme sonrası bulundu: ${selector}`);
+                  break;
+                }
+              }
+            } catch (e) {
+              continue;
+            }
+          }
+        } catch (retryError) {
+          console.warn(`⚠️ [Playwright] Ekstra bekleme ve retry hatası: ${retryError.message}`);
         }
       }
       
