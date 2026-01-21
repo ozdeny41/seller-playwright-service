@@ -129,45 +129,174 @@ class PlaywrightService {
       console.log(`⏳ [Playwright] Sayfa yükleme sonrası bekleme tamamlandı, "Deliver to" butonu aranıyor...`);
 
       // "Deliver to" butonunu bul ve tıkla - DOM Path: #nav-global-location-popover-link
-      // seller-playwright-service'teki gibi öncelikli selector'ları kullan
+      // KRİTİK: Sayfa yüklendikten sonra ekstra bekleme
+      await this.safeWait(page, 5000);
+      console.log(`⏳ [Playwright] Sayfa yükleme sonrası ekstra bekleme tamamlandı, "Deliver to" butonu aranıyor...`);
+      
+      // Network idle olmasını bekle (sayfa tam yüklensin)
+      try {
+        await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {
+          console.warn(`⚠️ [Playwright] Network idle bekleme timeout, devam ediliyor...`);
+        });
+      } catch (e) {
+        console.warn(`⚠️ [Playwright] Network idle hatası: ${e.message}`);
+      }
+      await this.safeWait(page, 2000);
+      
       console.log(`🎭 [Playwright] "Deliver to" butonu aranıyor...`);
       const deliverToSelectors = [
-        '#nav-global-location-popover-link', // Öncelikli selector (seller-playwright-service'teki gibi)
+        '#nav-global-location-popover-link', // Öncelikli selector
         'a#nav-global-location-popover-link',
+        'span#nav-global-location-popover-link',
         'a[data-csa-c-type="button"][id*="nav-global-location"]',
         'a[id*="nav-global-location"]',
-        'a:has-text("Deliver to")'
+        'span[id*="nav-global-location"]',
+        'a[aria-label*="Deliver to"]',
+        'span[aria-label*="Deliver to"]',
+        'a:has-text("Deliver to")',
+        'span:has-text("Deliver to")',
+        '#nav-global-location-slot',
+        '[data-csa-c-slot-id="nav-global-location"]',
+        'a[href*="glow=change-country"]',
+        'span[data-action="a-popover-trigger"]'
       ];
       
       let deliverToButton = null;
+      let foundSelector = null;
+      
+      // Önce tüm selector'ları dene (visible olmasa bile)
       for (const selector of deliverToSelectors) {
         try {
-          await page.waitForSelector(selector, { timeout: 20000, state: 'visible' });
-          deliverToButton = await page.$(selector);
-          if (deliverToButton) {
-            console.log(`✅ [Playwright] "Deliver to" butonu bulundu: ${selector}`);
-            break;
+          const element = await page.$(selector);
+          if (element) {
+            const isVisible = await element.isVisible().catch(() => false);
+            if (isVisible) {
+              deliverToButton = element;
+              foundSelector = selector;
+              console.log(`✅ [Playwright] "Deliver to" butonu bulundu (visible): ${selector}`);
+              break;
+            } else {
+              // Visible değilse de sakla, belki scroll ile görünür olur
+              if (!deliverToButton) {
+                deliverToButton = element;
+                foundSelector = selector;
+                console.log(`⚠️ [Playwright] "Deliver to" butonu bulundu (hidden): ${selector}`);
+              }
+            }
           }
         } catch (e) {
           continue;
         }
       }
       
+      // Eğer hala bulunamadıysa, waitForSelector ile bekle
       if (!deliverToButton) {
-        throw new Error('Deliver to button not found after exhaustive search');
+        console.log(`⏳ [Playwright] "Deliver to" butonu hemen bulunamadı, bekleniyor...`);
+        for (const selector of deliverToSelectors.slice(0, 5)) { // İlk 5 selector'ı bekle
+          try {
+            await page.waitForSelector(selector, { timeout: 15000, state: 'attached' });
+            deliverToButton = await page.$(selector);
+            if (deliverToButton) {
+              foundSelector = selector;
+              console.log(`✅ [Playwright] "Deliver to" butonu beklenerek bulundu: ${selector}`);
+              break;
+            }
+          } catch (e) {
+            continue;
+          }
+        }
       }
       
-      // "Deliver to" butonuna tıkla (seller-playwright-service'teki gibi)
+      // Son çare: Sayfa içeriğinde "Deliver to" text'ini ara
+      if (!deliverToButton) {
+        console.log(`🔍 [Playwright] "Deliver to" butonu selector'larla bulunamadı, sayfa içeriğinde aranıyor...`);
+        try {
+          const allLinks = await page.$$('a, span, button');
+          for (const link of allLinks) {
+            try {
+              const text = await link.textContent();
+              const ariaLabel = await link.getAttribute('aria-label');
+              if ((text && text.includes('Deliver to')) || (ariaLabel && ariaLabel.includes('Deliver to'))) {
+                deliverToButton = link;
+                foundSelector = 'text-content-search';
+                console.log(`✅ [Playwright] "Deliver to" butonu text içeriğinden bulundu`);
+                break;
+              }
+            } catch (e) {
+              continue;
+            }
+          }
+        } catch (e) {
+          console.warn(`⚠️ [Playwright] Text içeriği arama hatası: ${e.message}`);
+        }
+      }
+      
+      if (!deliverToButton) {
+        // Sayfa screenshot al (debug için)
+        try {
+          const screenshot = await page.screenshot({ fullPage: false });
+          console.error(`❌ [Playwright] Sayfa screenshot alındı (Deliver to butonu bulunamadı)`);
+        } catch (e) {
+          console.warn(`⚠️ [Playwright] Screenshot alınamadı: ${e.message}`);
+        }
+        
+        // Sayfa HTML'inin bir kısmını logla
+        try {
+          const bodyHTML = await page.evaluate(() => document.body.innerHTML.substring(0, 5000));
+          console.error(`❌ [Playwright] Sayfa HTML (ilk 5000 karakter):`, bodyHTML);
+        } catch (e) {
+          console.warn(`⚠️ [Playwright] HTML alınamadı: ${e.message}`);
+        }
+        
+        throw new Error(`Deliver to button not found after exhaustive search. Page title: "${await page.title()}"`);
+      }
+      
+      // "Deliver to" butonuna tıkla
       try {
-        await deliverToButton.scrollIntoViewIfNeeded();
+        // Butonun görünür olmasını sağla
+        const isVisible = await deliverToButton.isVisible().catch(() => false);
+        if (!isVisible) {
+          console.log(`⚠️ [Playwright] "Deliver to" butonu görünür değil, scroll yapılıyor...`);
+          await deliverToButton.scrollIntoViewIfNeeded();
+          await this.safeWait(page, 2000);
+        }
+        
+        // Butonun tıklanabilir olmasını bekle
+        await page.waitForSelector(foundSelector || deliverToSelectors[0], { 
+          timeout: 10000, 
+          state: 'visible' 
+        }).catch(() => {
+          console.warn(`⚠️ [Playwright] Buton visible state bekleme timeout, devam ediliyor...`);
+        });
+        
         await this.safeWait(page, 1000);
-        await deliverToButton.click({ timeout: 30000 });
+        
+        // Normal click dene
+        try {
+          await deliverToButton.click({ timeout: 30000 });
+          console.log(`✅ [Playwright] "Deliver to" butonuna tıklandı (normal click)`);
+        } catch (normalClickError) {
+          console.warn(`⚠️ [Playwright] Normal click başarısız, force click deneniyor: ${normalClickError.message}`);
+          await deliverToButton.click({ force: true, timeout: 30000 });
+          console.log(`✅ [Playwright] "Deliver to" butonuna tıklandı (force click)`);
+        }
+        
         await this.safeWait(page, 3000);
-        console.log(`✅ [Playwright] "Deliver to" butonuna tıklandı`);
       } catch (clickError) {
-        console.warn(`⚠️ [Playwright] Normal click başarısız, force click deneniyor: ${clickError.message}`);
-        await deliverToButton.click({ force: true, timeout: 30000 });
-        await this.safeWait(page, 3000);
+        console.error(`❌ [Playwright] "Deliver to" butonuna tıklama hatası: ${clickError.message}`);
+        // JavaScript ile click dene
+        try {
+          await page.evaluate((selector) => {
+            const element = document.querySelector(selector);
+            if (element) {
+              element.click();
+            }
+          }, foundSelector || deliverToSelectors[0]);
+          console.log(`✅ [Playwright] "Deliver to" butonuna JavaScript ile tıklandı`);
+          await this.safeWait(page, 3000);
+        } catch (jsClickError) {
+          throw new Error(`Deliver to button click failed: ${clickError.message}. JS click also failed: ${jsClickError.message}`);
+        }
       }
       
       // Popover açılmasını bekle
@@ -770,22 +899,103 @@ class PlaywrightService {
         }
         
         // Shipping & Import Charges: div#amazonGlobal_feature_div
+        // KRİTİK: Shipping bilgilerinin render olması için ekstra bekleme
+        await this.safeWait(page, 3000);
+        
         if (!shippingPrice) {
-          try {
-            const shippingElement = await page.$('div#amazonGlobal_feature_div span.a-size-base.a-color-secondary');
-            if (shippingElement) {
-              shippingText = await shippingElement.textContent().then(t => t.trim()).catch(() => null);
-              if (shippingText) {
-                // "$94.13 Shipping & Import Charges to United Kingdom" formatından fiyatı çıkar
-                const shippingMatch = shippingText.match(/[\$£€]?\s*([\d,]+\.?\d*)/);
-                if (shippingMatch) {
-                  shippingPrice = parseFloat(shippingMatch[1].replace(/,/g, ''));
-                  console.log(`✅ [Playwright] Buybox shippingPrice çekildi: ${shippingText} -> ${shippingPrice}`);
+          console.log(`🔍 [Playwright] Shipping price text aranıyor...`);
+          const shippingPriceSelectors = [
+            '#amazonGlobal_feature_div span.a-size-base.a-color-secondary',
+            '#apex_offerDisplay_single_desktop #amazonGlobal_feature_div span.a-size-base.a-color-secondary',
+            '#desktop_qualifiedBuyBox #amazonGlobal_feature_div span.a-size-base.a-color-secondary',
+            '#desktop_qualifiedBuyBox span.a-size-base.a-color-secondary',
+            '#apex_offerDisplay_single_desktop span.a-size-base.a-color-secondary',
+            '#qualifiedBuybox span.a-size-base.a-color-secondary',
+            '#buybox span.a-size-base.a-color-secondary',
+            '#desktop_buybox span.a-size-base.a-color-secondary',
+            'span.a-size-base.a-color-secondary:has-text("Shipping")',
+            'span.a-size-base.a-color-secondary:has-text("Import Charges")',
+            'span.a-size-base.a-color-secondary:has-text("Shipping & Import")',
+            '#desktop_buybox span:has-text("Shipping")',
+            '#buybox span:has-text("Shipping")',
+            '#qualifiedBuybox span:has-text("Shipping")'
+          ];
+          
+          for (const selector of shippingPriceSelectors) {
+            try {
+              const element = await page.$(selector);
+              if (element) {
+                const isVisible = await element.isVisible().catch(() => false);
+                if (isVisible) {
+                  shippingText = await element.textContent().then(t => t.trim()).catch(() => null);
+                  if (shippingText && (shippingText.includes('Shipping') || shippingText.includes('Import Charges') || shippingText.includes('delivery'))) {
+                    console.log(`✅ [Playwright] Shipping price text bulundu: ${shippingText} (selector: ${selector})`);
+                    break;
+                  }
+                }
+              }
+            } catch (e) {
+              continue;
+            }
+          }
+          
+          // Eğer hala bulunamadıysa, buybox içinde text arama
+          if (!shippingText) {
+            console.log(`🔍 [Playwright] Shipping text selector'larla bulunamadı, buybox içinde aranıyor...`);
+            try {
+              const buyboxSelectors = ['#desktop_buybox', '#buybox', '#qualifiedBuybox', '#apex_offerDisplay_single_desktop'];
+              for (const buyboxSelector of buyboxSelectors) {
+                try {
+                  const buyboxElement = await page.$(buyboxSelector);
+                  if (buyboxElement) {
+                    const buyboxText = await buyboxElement.textContent();
+                    if (buyboxText) {
+                      // Shipping ile ilgili text'i bul
+                      const shippingMatch = buyboxText.match(/([^.]*(?:Shipping|Import Charges|delivery)[^.]*)/i);
+                      if (shippingMatch) {
+                        shippingText = shippingMatch[1].trim();
+                        console.log(`✅ [Playwright] Shipping price text bulundu (buybox text): ${shippingText}`);
+                        break;
+                      }
+                    }
+                  }
+                } catch (e) {
+                  continue;
+                }
+              }
+            } catch (e) {
+              console.warn(`⚠️ [Playwright] Buybox text arama hatası: ${e.message}`);
+            }
+          }
+          
+          // Shipping price parse et
+          if (shippingText) {
+            console.log(`🔍 [Playwright] Shipping price text parse ediliyor: "${shippingText}"`);
+            
+            // "No Import Charges & $7.65 Shipping to United Kingdom" formatından fiyatı çıkar
+            let priceMatch = shippingText.match(/&\s*[\$£€]?\s*([\d,]+\.?\d*)\s*(?:Shipping|Import|to)/i);
+            if (priceMatch) {
+              shippingPrice = parseFloat(priceMatch[1].replace(/,/g, ''));
+              console.log(`✅ [Playwright] Standart gönderim fiyatı bulundu (after &): ${shippingPrice}`);
+            } else {
+              // "$94.14 Shipping & Import Charges" formatından fiyatı çıkar
+              priceMatch = shippingText.match(/[\$£€]?\s*([\d,]+\.?\d*)\s*(?:Shipping|Import)/i);
+              if (priceMatch) {
+                shippingPrice = parseFloat(priceMatch[1].replace(/,/g, ''));
+                console.log(`✅ [Playwright] Standart gönderim fiyatı bulundu (before Shipping): ${shippingPrice}`);
+              } else {
+                // Alternatif: Herhangi bir fiyat bul (ilk fiyat)
+                const altPriceMatch = shippingText.match(/[\$£€]?\s*([\d,]+\.?\d*)/);
+                if (altPriceMatch) {
+                  shippingPrice = parseFloat(altPriceMatch[1].replace(/,/g, ''));
+                  console.log(`✅ [Playwright] Standart gönderim fiyatı bulundu (first price): ${shippingPrice}`);
+                } else {
+                  console.warn(`⚠️ [Playwright] Shipping price text'ten fiyat çıkarılamadı: "${shippingText}"`);
                 }
               }
             }
-          } catch (e) {
-            console.warn(`⚠️ [Playwright] Buybox shippingPrice çekilemedi: ${e.message}`);
+          } else {
+            console.warn(`⚠️ [Playwright] Shipping price text bulunamadı`);
           }
         }
       } catch (e) {
@@ -797,23 +1007,39 @@ class PlaywrightService {
       let expressDeliveryDate = null;
       try {
         // Standard delivery: div#mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE_LARGE > span > span.a-text-bold
+        console.log(`🔍 [Playwright] Standart gönderim tarihi aranıyor...`);
         const standardDeliverySelectors = [
+          '#mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE_LARGE span.a-text-bold',
+          '#mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE_LARGE span span.a-text-bold',
+          '#mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE_LARGE',
+          '#deliveryBlockMessage span.a-text-bold',
+          '#deliveryBlockContainer span.a-text-bold',
+          '#deliveryBlockMessage',
+          '#deliveryBlockContainer',
           'div#mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE_LARGE span.a-text-bold',
-          'div#mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE_LARGE > span > span.a-text-bold',
-          'div#deliveryBlock_feature_div div#mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE_LARGE span.a-text-bold'
+          'div#mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE_LARGE',
+          '#deliveryBlock_feature_div span.a-text-bold',
+          '#deliveryBlock_feature_div',
+          'span.a-text-bold:has-text("Monday"), span.a-text-bold:has-text("Tuesday"), span.a-text-bold:has-text("Wednesday"), span.a-text-bold:has-text("Thursday"), span.a-text-bold:has-text("Friday"), span.a-text-bold:has-text("Saturday"), span.a-text-bold:has-text("Sunday")'
         ];
         
         for (const selector of standardDeliverySelectors) {
           try {
             const element = await page.$(selector);
             if (element) {
+              const isVisible = await element.isVisible().catch(() => false);
               const dateText = await element.textContent().then(t => t.trim()).catch(() => null);
               if (dateText) {
-                // "Monday, January 26" formatından sadece "January 26" çıkar (gün adını kaldır)
-                const dateMatch = dateText.match(/((?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2})/i);
+                // Tarih formatını kontrol et (Monday, Tuesday, vb. içermeli)
+                const dateMatch = dateText.match(/((?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),?\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2})/i);
                 if (dateMatch) {
                   standardDeliveryDate = dateMatch[1].trim();
-                  console.log(`✅ [Playwright] Buybox standardDeliveryDate çekildi: ${dateText} -> ${standardDeliveryDate}`);
+                  console.log(`✅ [Playwright] Standart gönderim tarihi bulundu: ${standardDeliveryDate} (selector: ${selector})`);
+                  break;
+                } else if (dateText.match(/(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)/i)) {
+                  // Sadece gün adı varsa, tam text'i al
+                  standardDeliveryDate = dateText;
+                  console.log(`✅ [Playwright] Standart gönderim tarihi bulundu (partial): ${standardDeliveryDate} (selector: ${selector})`);
                   break;
                 }
               }
@@ -823,30 +1049,121 @@ class PlaywrightService {
           }
         }
         
+        // Eğer hala bulunamadıysa, delivery block içinde text arama
+        if (!standardDeliveryDate) {
+          console.log(`🔍 [Playwright] Delivery tarihi selector'larla bulunamadı, delivery block içinde aranıyor...`);
+          try {
+            const deliverySelectors = ['#deliveryBlockMessage', '#deliveryBlockContainer', '#deliveryBlock_feature_div'];
+            for (const deliverySelector of deliverySelectors) {
+              try {
+                const deliveryElement = await page.$(deliverySelector);
+                if (deliveryElement) {
+                  const deliveryText = await deliveryElement.textContent();
+                  if (deliveryText) {
+                    const dateMatch = deliveryText.match(/((?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),?\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2})/i);
+                    if (dateMatch) {
+                      standardDeliveryDate = dateMatch[1].trim();
+                      console.log(`✅ [Playwright] Standart gönderim tarihi bulundu (delivery block text): ${standardDeliveryDate}`);
+                      break;
+                    }
+                  }
+                }
+              } catch (e) {
+                continue;
+              }
+            }
+          } catch (e) {
+            console.warn(`⚠️ [Playwright] Delivery block text arama hatası: ${e.message}`);
+          }
+        }
+        
         // Express delivery: div#mir-layout-DELIVERY_BLOCK-slot-SECONDARY_DELIVERY_MESSAGE_LARGE > span
+        console.log(`🔍 [Playwright] Express delivery bilgisi aranıyor...`);
         const expressDeliverySelectors = [
-          'div#mir-layout-DELIVERY_BLOCK-slot-SECONDARY_DELIVERY_MESSAGE_LARGE span',
-          'div#mir-layout-DELIVERY_BLOCK-slot-SECONDARY_DELIVERY_MESSAGE_LARGE > span',
-          'div#deliveryBlock_feature_div div#mir-layout-DELIVERY_BLOCK-slot-SECONDARY_DELIVERY_MESSAGE_LARGE span'
+          'span[data-csa-c-delivery-time]', // Öncelikli - attribute'dan direkt çek
+          '#mir-layout-DELIVERY_BLOCK-slot-SECONDARY_DELIVERY_MESSAGE_LARGE',
+          '#mir-layout-DELIVERY_BLOCK-slot-SECONDARY_DELIVERY_MESSAGE_LARGE span',
+          'span[data-csa-c-delivery-type="delivery"]',
+          '#deliveryBlockMessage span[data-csa-c-delivery-time]',
+          '#deliveryBlockContainer span[data-csa-c-delivery-time]',
+          'span:has-text("fastest delivery")',
+          'span:has-text("Or fastest")',
+          '#deliveryBlockMessage span:has-text("fastest")',
+          '#deliveryBlockContainer span:has-text("fastest")'
         ];
         
+        let fastestDeliveryText = null;
         for (const selector of expressDeliverySelectors) {
           try {
             const element = await page.$(selector);
             if (element) {
+              // KRİTİK: Önce data-csa-c-delivery-time attribute'undan tarihi çek
+              const deliveryTimeAttr = await element.getAttribute('data-csa-c-delivery-time');
+              if (deliveryTimeAttr) {
+                expressDeliveryDate = deliveryTimeAttr.trim();
+                console.log(`✅ [Playwright] Express delivery tarihi (attribute): ${expressDeliveryDate}`);
+              }
+              
+              // Text içeriğini de al
               const dateText = await element.textContent().then(t => t.trim()).catch(() => null);
               if (dateText) {
-                // "Or fastest delivery Friday, January 23" formatından sadece "January 23" çıkar
-                const dateMatch = dateText.match(/((?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2})/i);
-                if (dateMatch) {
-                  expressDeliveryDate = dateMatch[1].trim();
-                  console.log(`✅ [Playwright] Buybox expressDeliveryDate çekildi: ${dateText} -> ${expressDeliveryDate}`);
+                fastestDeliveryText = dateText;
+                console.log(`✅ [Playwright] Fastest delivery text bulundu: ${fastestDeliveryText}`);
+                
+                // Eğer attribute'dan tarih gelmediyse, text'ten çıkar
+                if (!expressDeliveryDate) {
+                  // "Or fastest delivery Friday, January 23" formatından tarih çıkar
+                  const dateMatch = dateText.match(/((?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),?\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2})/i);
+                  if (dateMatch) {
+                    expressDeliveryDate = dateMatch[1].trim();
+                    console.log(`✅ [Playwright] Hızlı gönderim tarihi (text): ${expressDeliveryDate}`);
+                  }
+                }
+                
+                if (expressDeliveryDate || fastestDeliveryText) {
                   break;
                 }
               }
             }
           } catch (e) {
             continue;
+          }
+        }
+        
+        // Eğer hala express delivery bilgisi bulunamadıysa, delivery block içinde text arama
+        if (!expressDeliveryDate) {
+          console.log(`🔍 [Playwright] Express delivery selector'larla bulunamadı, delivery block içinde aranıyor...`);
+          try {
+            const deliverySelectors = ['#deliveryBlockMessage', '#deliveryBlockContainer', '#deliveryBlock_feature_div'];
+            for (const deliverySelector of deliverySelectors) {
+              try {
+                const deliveryElement = await page.$(deliverySelector);
+                if (deliveryElement) {
+                  const deliveryText = await deliveryElement.textContent();
+                  if (deliveryText) {
+                    // "fastest" veya "Or fastest" içeren kısmı bul
+                    const fastestMatch = deliveryText.match(/([^.]*(?:fastest|Or fastest)[^.]*)/i);
+                    if (fastestMatch) {
+                      fastestDeliveryText = fastestMatch[1].trim();
+                      console.log(`✅ [Playwright] Fastest delivery text bulundu (delivery block): ${fastestDeliveryText}`);
+                      
+                      // Tarih çıkar
+                      const dateMatch = fastestDeliveryText.match(/((?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),?\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2})/i);
+                      if (dateMatch) {
+                        expressDeliveryDate = dateMatch[1].trim();
+                        console.log(`✅ [Playwright] Express delivery tarihi bulundu (delivery block): ${expressDeliveryDate}`);
+                      }
+                      
+                      break;
+                    }
+                  }
+                }
+              } catch (e) {
+                continue;
+              }
+            }
+          } catch (e) {
+            console.warn(`⚠️ [Playwright] Express delivery block text arama hatası: ${e.message}`);
           }
         }
       } catch (e) {
@@ -1719,11 +2036,86 @@ class PlaywrightService {
         } else {
           console.log(`✅ [Playwright] Ülke ve para birimi seçimi tamamlandı`);
           
-          // ASIN sayfasına geri dön (eğer preferences sayfasındaysak)
-          if (!page.url().includes('/dp/')) {
+          // ASIN sayfasına geri dön (eğer preferences sayfasındaysak veya sayfa yüklenmemişse)
+          const currentUrl = page.url();
+          const isOnAsinPage = currentUrl.includes('/dp/');
+          const needsNavigation = !isOnAsinPage;
+          
+          if (needsNavigation) {
             console.log(`🔗 [Playwright] ASIN sayfasına geri dönülüyor: ${productUrl}`);
-            await page.goto(productUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
-            await this.safeWait(page, 5000);
+            try {
+              // KRİTİK: domcontentloaded kullan - daha hızlı ve güvenilir
+              await page.goto(productUrl, { waitUntil: 'domcontentloaded', timeout: 120000 });
+              console.log(`✅ [Playwright] ASIN sayfası DOM yüklendi`);
+              
+              // Ekstra bekleme - buybox'ın render olması için
+              await this.safeWait(page, 5000);
+              
+              // Buybox container'ının yüklenmesini bekle - daha esnek selector'lar
+              console.log(`⏳ [Playwright] Buybox container'ının yüklenmesi bekleniyor...`);
+              try {
+                await page.waitForSelector('#desktop_buybox, #buybox, #qualifiedBuybox, #apex_offerDisplay_single_desktop, #apex_offerDisplay_desktop', { 
+                  timeout: 45000, 
+                  state: 'attached' 
+                });
+                console.log(`✅ [Playwright] Buybox container bulundu`);
+              } catch (selectorError) {
+                console.warn(`⚠️ [Playwright] Buybox container selector bulunamadı, devam ediliyor...`);
+                // Ekstra bekleme - belki yükleniyor
+                await this.safeWait(page, 5000);
+              }
+              
+              // Ekstra bekleme - shipping bilgilerinin render olması için
+              await this.safeWait(page, 3000);
+              
+              // Network idle olmasını bekle (opsiyonel ama faydalı)
+              try {
+                await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {
+                  console.warn(`⚠️ [Playwright] Network idle bekleme timeout, devam ediliyor...`);
+                });
+              } catch (networkError) {
+                // Network idle bekleme başarısız olsa bile devam et
+              }
+            } catch (gotoError) {
+              console.error(`❌ [Playwright] ASIN sayfasına dönüş hatası: ${gotoError.message}`);
+              // Hata olsa bile devam et - belki sayfa zaten yüklü
+              // Sayfanın mevcut durumunu kontrol et
+              try {
+                const currentUrl = page.url();
+                if (currentUrl.includes('/dp/')) {
+                  console.log(`✅ [Playwright] Sayfa zaten ASIN sayfasında: ${currentUrl}`);
+                  await this.safeWait(page, 5000);
+                } else {
+                  // Sayfa yüklenmemiş, tekrar dene
+                  console.log(`🔄 [Playwright] Sayfa yüklenmemiş, tekrar deneniyor...`);
+                  await page.goto(productUrl, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {
+                    console.warn(`⚠️ [Playwright] İkinci deneme de başarısız, mevcut sayfayla devam ediliyor...`);
+                  });
+                  await this.safeWait(page, 5000);
+                }
+              } catch (retryError) {
+                console.warn(`⚠️ [Playwright] Retry hatası: ${retryError.message}, mevcut sayfayla devam ediliyor...`);
+                await this.safeWait(page, 5000);
+              }
+            }
+          } else {
+            console.log(`✅ [Playwright] Sayfa zaten ASIN sayfasında: ${currentUrl}`);
+            // Sayfa zaten ASIN sayfasında, buybox'ın yüklenmesini bekle
+            await this.safeWait(page, 3000);
+          }
+          
+          // Buybox container'ını bekle (her durumda) - daha esnek selector'lar
+          console.log(`⏳ [Playwright] Buybox container'ının varlığı kontrol ediliyor...`);
+          try {
+            await page.waitForSelector('#desktop_buybox, #buybox, #qualifiedBuybox, #apex_offerDisplay_single_desktop, #apex_offerDisplay_desktop, #corePrice_feature_div', { 
+              timeout: 30000,
+              state: 'attached'
+            });
+            console.log(`✅ [Playwright] Buybox container doğrulandı`);
+          } catch (selectorError) {
+            console.warn(`⚠️ [Playwright] Buybox container bulunamadı, shipping bilgileri çekilmeye devam ediliyor...`);
+            // Ekstra bekleme - belki yükleniyor
+            await this.safeWait(page, 3000);
           }
         }
       }
