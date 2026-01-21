@@ -125,7 +125,7 @@ class PlaywrightService {
 
       // KRİTİK: Sayfa yüklendikten sonra ekstra bekleme (seller-playwright-service'teki gibi)
       // Sayfa tam yüklenmesi için bekle
-      await this.safeWait(page, 3000);
+      await this.safeWait(page, 5000);
       console.log(`⏳ [Playwright] Sayfa yükleme sonrası bekleme tamamlandı, "Deliver to" butonu aranıyor...`);
 
       // "Deliver to" butonunu bul ve tıkla - DOM Path: #nav-global-location-popover-link
@@ -133,15 +133,31 @@ class PlaywrightService {
       await this.safeWait(page, 5000);
       console.log(`⏳ [Playwright] Sayfa yükleme sonrası ekstra bekleme tamamlandı, "Deliver to" butonu aranıyor...`);
       
-      // Network idle olmasını bekle (sayfa tam yüklensin)
+      // Network idle olmasını bekle (sayfa tam yüklensin) - timeout'u kısalt
       try {
-        await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {
+        await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {
           console.warn(`⚠️ [Playwright] Network idle bekleme timeout, devam ediliyor...`);
         });
       } catch (e) {
         console.warn(`⚠️ [Playwright] Network idle hatası: ${e.message}`);
       }
-      await this.safeWait(page, 2000);
+      await this.safeWait(page, 3000);
+      
+      // KRİTİK: Sayfa title'ını kontrol et - eğer "Amazon.com" ise sayfa tam yüklenmemiş olabilir
+      const pageTitle = await page.title().catch(() => '');
+      if (pageTitle === 'Amazon.com' || pageTitle === 'Amazon' || !pageTitle) {
+        console.warn(`⚠️ [Playwright] Sayfa title sadece "Amazon.com" - sayfa tam yüklenmemiş olabilir, ekstra bekleme...`);
+        await this.safeWait(page, 5000);
+        
+        // Sayfayı yeniden yükle
+        try {
+          await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
+          await this.safeWait(page, 5000);
+          console.log(`✅ [Playwright] Sayfa yeniden yüklendi`);
+        } catch (reloadError) {
+          console.warn(`⚠️ [Playwright] Sayfa reload hatası: ${reloadError.message}`);
+        }
+      }
       
       console.log(`🎭 [Playwright] "Deliver to" butonu aranıyor...`);
       const deliverToSelectors = [
@@ -647,6 +663,24 @@ class PlaywrightService {
   async extractBuyboxData(page) {
     try {
       console.log(`🔍 [Playwright] Buybox bilgileri çekiliyor (PDP sayfasından)...`);
+      
+      // KRİTİK: Sayfa title'ını kontrol et - eğer sadece "Amazon.com" ise sayfa tam yüklenmemiş olabilir
+      const pageTitle = await page.title().catch(() => '');
+      if (pageTitle === 'Amazon.com' || pageTitle === 'Amazon' || !pageTitle) {
+        console.warn(`⚠️ [Playwright] Sayfa title sadece "Amazon.com" - sayfa tam yüklenmemiş olabilir, ekstra bekleme...`);
+        await this.safeWait(page, 5000);
+        
+        // Buybox container'ının yüklenmesini bekle
+        try {
+          await page.waitForSelector('#desktop_buybox, #buybox, #qualifiedBuybox, #apex_offerDisplay_single_desktop, #apex_offerDisplay_desktop', { 
+            timeout: 20000, 
+            state: 'attached' 
+          });
+          console.log(`✅ [Playwright] Buybox container yüklendi`);
+        } catch (e) {
+          console.warn(`⚠️ [Playwright] Buybox container bekleme timeout`);
+        }
+      }
       
       // Sayfanın yüklenmesini bekle
       await this.safeWait(page, 3000);
@@ -1215,8 +1249,62 @@ class PlaywrightService {
         isSBA = false;
       }
       
-      // Buybox objesi oluştur
-      if (sellerName || price) {
+      // KRİTİK: Eğer shipping bilgileri hala null ise, buybox içinde daha detaylı arama yap
+      if (!shippingPrice && !standardDeliveryDate && !expressDeliveryDate) {
+        console.log(`⚠️ [Playwright] Shipping bilgileri bulunamadı, buybox içinde detaylı arama yapılıyor...`);
+        try {
+          // Tüm buybox container'larını kontrol et
+          const buyboxContainers = ['#desktop_buybox', '#buybox', '#qualifiedBuybox', '#apex_offerDisplay_single_desktop'];
+          for (const containerSelector of buyboxContainers) {
+            try {
+              const container = await page.$(containerSelector);
+              if (container) {
+                const containerText = await container.textContent();
+                if (containerText) {
+                  // Shipping price ara
+                  if (!shippingPrice) {
+                    const shippingMatch = containerText.match(/[\$£€]?\s*([\d,]+\.?\d*)\s*(?:Shipping|delivery|Import)/i);
+                    if (shippingMatch) {
+                      shippingPrice = parseFloat(shippingMatch[1].replace(/,/g, ''));
+                      console.log(`✅ [Playwright] Shipping price buybox container'dan bulundu: ${shippingPrice}`);
+                    }
+                  }
+                  
+                  // Delivery date ara
+                  if (!standardDeliveryDate) {
+                    const dateMatch = containerText.match(/((?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),?\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2})/i);
+                    if (dateMatch) {
+                      standardDeliveryDate = dateMatch[1].trim();
+                      console.log(`✅ [Playwright] Delivery date buybox container'dan bulundu: ${standardDeliveryDate}`);
+                    }
+                  }
+                  
+                  // Express delivery ara
+                  if (!expressDeliveryDate) {
+                    const expressMatch = containerText.match(/(?:fastest|Or fastest).*?((?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),?\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2})/i);
+                    if (expressMatch) {
+                      expressDeliveryDate = expressMatch[1].trim();
+                      console.log(`✅ [Playwright] Express delivery date buybox container'dan bulundu: ${expressDeliveryDate}`);
+                    }
+                  }
+                  
+                  if (shippingPrice || standardDeliveryDate || expressDeliveryDate) {
+                    break;
+                  }
+                }
+              }
+            } catch (e) {
+              continue;
+            }
+          }
+        } catch (e) {
+          console.warn(`⚠️ [Playwright] Buybox container detaylı arama hatası: ${e.message}`);
+        }
+      }
+      
+      // Buybox objesi oluştur - shipping bilgileri olsa da olmasa da döndür
+      // KRİTİK: sellerName veya price yoksa bile, shipping bilgileri varsa döndür
+      if (sellerName || price || shippingPrice || standardDeliveryDate || expressDeliveryDate) {
         return {
           sellerName: sellerName || null,
           soldBy: soldBy || sellerName || null,
@@ -1249,6 +1337,8 @@ class PlaywrightService {
         };
       }
       
+      // KRİTİK: Hiçbir bilgi yoksa bile null döndür (retry mekanizması çalışsın)
+      console.warn(`⚠️ [Playwright] Buybox bilgileri hiç bulunamadı (sellerName, price, shipping hepsi null)`);
       return null;
     } catch (e) {
       console.error(`❌ [Playwright] Buybox data extraction hatası: ${e.message}`);
@@ -2068,13 +2158,22 @@ class PlaywrightService {
               // Ekstra bekleme - shipping bilgilerinin render olması için
               await this.safeWait(page, 3000);
               
-              // Network idle olmasını bekle (opsiyonel ama faydalı)
+              // KRİTİK: Network idle bekleme - timeout'u kısalt (çok katı olabilir)
+              // Amazon sayfaları bazen network idle olmuyor, bu yüzden timeout'u kısalt
               try {
-                await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {
+                await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {
                   console.warn(`⚠️ [Playwright] Network idle bekleme timeout, devam ediliyor...`);
                 });
               } catch (networkError) {
                 // Network idle bekleme başarısız olsa bile devam et
+                console.warn(`⚠️ [Playwright] Network idle bekleme hatası: ${networkError.message}`);
+              }
+              
+              // KRİTİK: Sayfa title'ını kontrol et - eğer sadece "Amazon.com" ise sayfa tam yüklenmemiş olabilir
+              const pageTitle = await page.title().catch(() => '');
+              if (pageTitle === 'Amazon.com' || pageTitle === 'Amazon' || !pageTitle) {
+                console.warn(`⚠️ [Playwright] Sayfa title sadece "Amazon.com" - sayfa tam yüklenmemiş olabilir, ekstra bekleme...`);
+                await this.safeWait(page, 5000);
               }
             } catch (gotoError) {
               console.error(`❌ [Playwright] ASIN sayfasına dönüş hatası: ${gotoError.message}`);
@@ -2121,10 +2220,39 @@ class PlaywrightService {
       }
       
       // KRİTİK: Buybox bilgilerini çek (PDP sayfasından) - AOD'ye gitmeden önce
+      // KRİTİK: Shipping bilgileri çekilemediğinde retry mekanizması
       console.log(`🛒 [Playwright] Buybox bilgileri çekiliyor (PDP sayfasından)...`);
-      const buyboxData = await this.extractBuyboxData(page);
+      let buyboxData = await this.extractBuyboxData(page);
+      
+      // Eğer shipping bilgileri eksikse, sayfayı yeniden yükle ve tekrar dene
+      if (!buyboxData || (!buyboxData.standardShippingPrice && !buyboxData.standardDeliveryDate && !buyboxData.sellerName)) {
+        console.warn(`⚠️ [Playwright] Buybox bilgileri eksik veya null, sayfa yeniden yükleniyor ve tekrar deneniyor...`);
+        try {
+          // Sayfayı yeniden yükle
+          await page.reload({ waitUntil: 'domcontentloaded', timeout: 120000 });
+          await this.safeWait(page, 5000);
+          
+          // Buybox container'ını bekle
+          try {
+            await page.waitForSelector('#desktop_buybox, #buybox, #qualifiedBuybox, #apex_offerDisplay_single_desktop, #apex_offerDisplay_desktop', { 
+              timeout: 30000, 
+              state: 'attached' 
+            });
+          } catch (e) {
+            console.warn(`⚠️ [Playwright] Buybox container retry'de bulunamadı`);
+          }
+          
+          await this.safeWait(page, 3000);
+          
+          // Tekrar dene
+          buyboxData = await this.extractBuyboxData(page);
+        } catch (retryError) {
+          console.warn(`⚠️ [Playwright] Buybox bilgileri retry hatası: ${retryError.message}`);
+        }
+      }
+      
       if (buyboxData) {
-        console.log(`✅ [Playwright] Buybox bilgileri çekildi: ${buyboxData.sellerName || 'N/A'}, $${buyboxData.price || 'N/A'}`);
+        console.log(`✅ [Playwright] Buybox bilgileri çekildi: ${buyboxData.sellerName || 'N/A'}, $${buyboxData.price || 'N/A'}, Shipping: $${buyboxData.standardShippingPrice || 'N/A'}, Date: ${buyboxData.standardDeliveryDate || 'N/A'}`);
       } else {
         console.warn(`⚠️ [Playwright] Buybox bilgileri çekilemedi`);
       }
