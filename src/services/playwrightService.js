@@ -520,19 +520,55 @@ class PlaywrightService {
         throw new Error(`Country option not found for ${amazonCountryCode} (${targetCountryName}). Toplam ${allOptions.length} seçenek var (örnek: ${sampleOptions.join(', ')})`);
       }
       
-      // Ülke seçeneğini bul ve tıkla
-      const countryOptionSelectors = [
-        foundOption.id ? `a#${foundOption.id}` : null,
-        `a[data-value="${foundOption.value}"]`,
-        `a:has-text("${foundOption.text}")`
-      ].filter(Boolean);
+      // KRİTİK: Filtreleme yapıldıktan sonra ID'ler değişebilir, bu yüzden sadece data-value ile exact match kullan
+      // Ülke seçeneğini bul ve tıkla - öncelikli: data-value exact match (ID'ler filtreleme sonrası yanlış olabilir)
+      const countryOptionSelectors = [];
+      
+      // KRİTİK: Önce data-value ile exact match (filtreleme sonrası ID'ler değişebilir)
+      countryOptionSelectors.push(`a[data-value="${foundOption.value}"]`);
+      
+      // Fallback: text match (ama ID kullanma - filtreleme sonrası yanlış olabilir)
+      countryOptionSelectors.push(`a:has-text("${foundOption.text}")`);
+      
+      // KRİTİK: ID'leri en sona koy (filtreleme sonrası yanlış olabilir)
+      if (foundOption.id) {
+        countryOptionSelectors.push(`a#${foundOption.id}`);
+        console.log(`🔍 [Playwright] Bulunan ID fallback olarak eklendi: a#${foundOption.id} (filtreleme sonrası yanlış olabilir)`);
+      }
       
       let countryOption = null;
       for (const selector of countryOptionSelectors) {
         try {
           countryOption = await page.waitForSelector(selector, { timeout: 10000, state: 'visible' });
           if (countryOption) {
-            console.log(`✅ [Playwright] Ülke seçeneği elementi bulundu: ${selector}`);
+            // KRİTİK: Seçilecek elementin text'ini ve data-value'sunu kontrol et - yanlış ülke seçilmesini önle
+            const optionText = await countryOption.textContent().catch(() => '');
+            const optionDataValue = await countryOption.getAttribute('data-value').catch(() => '');
+            
+            // Data-value içinde doğru country code olup olmadığını kontrol et
+            let isValidOption = false;
+            try {
+              if (optionDataValue) {
+                const valueObj = JSON.parse(optionDataValue);
+                isValidOption = valueObj.stringVal === amazonCountryCode;
+              }
+            } catch (e) {
+              // JSON parse başarısız, string içinde ara
+              isValidOption = optionDataValue && optionDataValue.includes(`"stringVal":"${amazonCountryCode}"`);
+            }
+            
+            // Text içinde de kontrol et (fallback)
+            if (!isValidOption && optionText) {
+              isValidOption = optionText.includes(targetCountryName) || optionText.toLowerCase().includes(amazonCountryCode.toLowerCase());
+            }
+            
+            if (!isValidOption) {
+              console.warn(`⚠️ [Playwright] Seçilen element yanlış ülkeye ait: "${optionText}" (data-value: ${optionDataValue}), atlanıyor...`);
+              countryOption = null;
+              continue;
+            }
+            
+            console.log(`✅ [Playwright] Ülke seçeneği elementi bulundu ve doğrulandı: ${selector} - "${optionText}"`);
             break;
           }
         } catch (e) {
