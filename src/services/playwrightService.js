@@ -440,6 +440,49 @@ class PlaywrightService {
         await this.safeWait(page, 2000);
       }
       
+      // KRİTİK: Dropdown açıldıktan sonra ülkenin baş harfine basarak filtreleme yap
+      // Navbar'da hangi ülke seçili ise o ülkenin baş harfi seçilerek yapılmalı
+      let firstLetter = null;
+      try {
+        // Navbar'dan seçili ülke adını al (#glow-ingress-line2)
+        const selectedCountryElement = await page.$('#glow-ingress-line2');
+        if (selectedCountryElement) {
+          const selectedCountryText = await selectedCountryElement.textContent();
+          if (selectedCountryText && selectedCountryText.trim()) {
+            firstLetter = selectedCountryText.trim().charAt(0).toUpperCase();
+            console.log(`🌍 [Playwright] Navbar'dan seçili ülke bulundu: "${selectedCountryText.trim()}", baş harf: "${firstLetter}"`);
+          }
+        }
+      } catch (navbarError) {
+        console.warn(`⚠️ [Playwright] Navbar'dan ülke okunamadı: ${navbarError.message}, targetCountryName kullanılıyor...`);
+      }
+      
+      // Eğer navbar'dan okunamadıysa, targetCountryName'den baş harfi al
+      if (!firstLetter && targetCountryName) {
+        firstLetter = targetCountryName.charAt(0).toUpperCase();
+        console.log(`🌍 [Playwright] TargetCountryName'den baş harf alındı: "${firstLetter}" (${targetCountryName})`);
+      }
+      
+      // Dropdown açıldıktan sonra ülkenin baş harfine bas
+      if (firstLetter) {
+        try {
+          // Popover'ın açıldığından emin ol
+          await page.waitForSelector('#a-popover-4, ul.a-list-item', { timeout: 5000, state: 'visible' }).catch(() => {
+            console.warn(`⚠️ [Playwright] Popover hemen bulunamadı, devam ediliyor...`);
+          });
+          await this.safeWait(page, 500);
+          
+          // Ülkenin baş harfine bas
+          await page.keyboard.press(firstLetter);
+          await this.safeWait(page, 1000); // Filtreleme için bekle
+          console.log(`⌨️ [Playwright] Dropdown açıldı, "${firstLetter}" harfine basıldı, ülke filtreleniyor...`);
+        } catch (keyboardError) {
+          console.warn(`⚠️ [Playwright] Keyboard press hatası: ${keyboardError.message}, devam ediliyor...`);
+        }
+      } else {
+        console.warn(`⚠️ [Playwright] Baş harf bulunamadı, filtreleme yapılmadan devam ediliyor...`);
+      }
+      
       // Ülke seçeneğini bul ve tıkla
       console.log(`🎭 [Playwright] Ülke seçeneği aranıyor: ${amazonCountryCode} (${targetCountryName})...`);
       
