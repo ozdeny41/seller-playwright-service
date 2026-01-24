@@ -2777,9 +2777,55 @@ class PlaywrightService {
       // Seller bilgilerini çekme mantığı
       console.log(`🛒 [Playwright] Seller bilgileri çekiliyor...`);
       
+      // KRİTİK: Ülke + para birimi seçildikten sonra AOD sayfasına sabit link formatıyla git
+      // Envanterde yüklü her ASIN için sadece ASIN değişecek
+      let isOnAodPage = false;
+      const directAodUrl = `${baseUrl}/dp/${asin}/ref=olp-opf-redir?aod=1&ie=UTF8&condition=NEW&th=1`;
+      console.log(`🔗 [Playwright] AOD sayfasına gidiliyor (sabit link): ${directAodUrl}`);
+      try {
+        await page.goto(directAodUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+        isOnAodPage = true;
+      } catch (e) {
+        console.warn(`⚠️ [Playwright] AOD sabit link ile açılamadı, eski yönteme düşülüyor: ${e.message}`);
+        isOnAodPage = false;
+      }
+
+      // Captcha sayfası kontrolü (AOD linkinde çıkabiliyor)
+      try {
+        const urlNow = page.url();
+        const bodyText = await page.textContent('body').catch(() => '');
+        const isCaptchaPage = urlNow.includes('/errors/validateCaptcha') || bodyText.includes('Click the button below to continue shopping');
+        if (isCaptchaPage) {
+          console.warn(`⚠️ [Playwright] Captcha sayfası tespit edildi (AOD), Continue shopping tıklanıyor...`);
+          const btnSelectors = [
+            'button[alt="Continue shopping"]',
+            'form[action="/errors/validateCaptcha"] button[type="submit"]',
+            'form[action="/errors/validateCaptcha"] button',
+            'button:has-text("Continue shopping")',
+            'button[type="submit"]'
+          ];
+          for (const sel of btnSelectors) {
+            try {
+              const btn = await page.$(sel).catch(() => null);
+              if (btn) {
+                await btn.click({ timeout: 30000 }).catch(() => btn.click({ force: true, timeout: 30000 }));
+                await this.safeWait(page, 3000);
+                break;
+              }
+            } catch (e) {
+              continue;
+            }
+          }
+        }
+      } catch (e) {
+        // Captcha kontrolü başarısız olsa bile akışa devam
+      }
+      
       // Sayfanın yüklenmesini bekle
       await this.safeWait(page, 3000);
-      console.log(`⏳ [Playwright] Sayfa yüklendi, "New & Used" linki aranıyor...`);
+
+      if (!isOnAodPage) {
+        console.log(`⏳ [Playwright] Sayfa yüklendi, "New & Used" linki aranıyor...`);
       
       // "New & Used" linkini bul ve tıkla
       // KRİTİK: "Other sellers" linki de kabul edilmeli (bazı ürünlerde "New & Used" yerine "Other sellers" görünüyor)
@@ -3146,6 +3192,7 @@ class PlaywrightService {
       // 3 saniye bekle (modal/sayfa açılması için)
       console.log(`⏳ [Playwright] Modal/sayfa açılması bekleniyor (3 saniye)...`);
       await this.safeWait(page, 3000);
+      }
       
       // AOD (All Offers Display) container'ını bekle - KRİTİK: Sidebar açılması için bekle
       console.log(`🛒 [Playwright] Seller listesi container'ı bekleniyor (sidebar açılması için)...`);
@@ -3300,8 +3347,10 @@ class PlaywrightService {
       }
       
       // uniqueSellers varsa onu kullan, yoksa sellers'ı kullan
-      const finalSellers = uniqueSellers.length > 0 ? uniqueSellers : sellers;
-      const finalTotalSellers = uniqueSellers.length > 0 ? uniqueSellers.length : (totalSellers || sellers.length);
+      // KRİTİK: Modal'da tüm satıcılar/offer'lar gösterilecek (unique'e indirgeme yapma)
+      const preferAllOffers = true;
+      const finalSellers = preferAllOffers ? sellers : (uniqueSellers.length > 0 ? uniqueSellers : sellers);
+      let finalTotalSellers = preferAllOffers ? sellers.length : (uniqueSellers.length > 0 ? uniqueSellers.length : (totalSellers || sellers.length));
       
       // KRİTİK: Buybox'ı seller listesinin başına ekle (eğer varsa ve listede yoksa)
       if (buyboxData) {
@@ -3319,6 +3368,11 @@ class PlaywrightService {
         } else {
           console.log(`ℹ️ [Playwright] Buybox zaten listede mevcut`);
         }
+      }
+      
+      // KRİTİK: Total seller sayısını, döndürülen listenin uzunluğuna göre düzelt
+      if (!finalTotalSellers || finalTotalSellers < finalSellers.length) {
+        finalTotalSellers = finalSellers.length;
       }
       
       return {
@@ -3361,6 +3415,245 @@ class PlaywrightService {
         }
       } catch (e) {
         console.warn(`⚠️ [Playwright] Browser close error: ${e.message}`);
+      }
+    }
+  }
+
+  /**
+   * Get seller information for multiple ASINs in a single browser session.
+   * Ülke + para birimi seçimi 1 kez yapılır, sonra ASIN değiştirerek AOD sayfaları gezilir.
+   * @param {string[]} asins
+   * @param {string} sourceMarketplace
+   * @param {string|null} targetCountry
+   * @returns {Promise<{success: boolean, data: Object|null, error: string|null, status: number}>}
+   */
+  async getSellerInfoBatch(asins, sourceMarketplace = 'amazon.com', targetCountry = null) {
+    let browser = null;
+    let page = null;
+
+    try {
+      const asinList = Array.isArray(asins)
+        ? asins.map(a => String(a || '').trim()).filter(Boolean)
+        : [];
+
+      if (asinList.length === 0) {
+        return { success: false, data: null, error: 'ASIN list is required', status: 400 };
+      }
+
+      console.log(`🎭 [Playwright] Batch seller bilgileri çekiliyor: ${asinList.length} ASIN from ${sourceMarketplace}`);
+
+      // Browser başlat
+      console.log('🌐 [Playwright] Browser başlatılıyor (batch)...');
+      browser = await chromium.launch({
+        headless: true,
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-accelerated-2d-canvas',
+          '--disable-gpu',
+          '--disable-blink-features=AutomationControlled',
+          '--single-process',
+          '--disable-background-timer-throttling',
+          '--disable-backgrounding-occluded-windows',
+          '--disable-renderer-backgrounding'
+        ],
+        timeout: 30000
+      });
+
+      const context = await browser.newContext({
+        viewport: { width: 1920, height: 1080 },
+        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        locale: 'en-US',
+        timezoneId: 'America/New_York'
+      });
+
+      page = await context.newPage();
+
+      const marketplaceDomain = {
+        'amazon.com': 'www.amazon.com',
+        'amazon.co.uk': 'www.amazon.co.uk',
+        'amazon.de': 'www.amazon.de',
+        'amazon.es': 'www.amazon.es',
+        'amazon.it': 'www.amazon.it',
+        'amazon.fr': 'www.amazon.fr',
+        'amazon.co.jp': 'www.amazon.co.jp'
+      };
+
+      const baseDomain = marketplaceDomain[sourceMarketplace] || 'www.amazon.com';
+      const baseUrl = `https://${baseDomain}`;
+
+      // İlk ASIN ile ülke + para birimi seçimi (tek sefer)
+      if (targetCountry) {
+        const firstAsin = asinList[0];
+        const firstProductUrl = `${baseUrl}/dp/${firstAsin}`;
+        console.log(`🌐 [Playwright] (batch) İlk ASIN sayfası açılıyor: ${firstProductUrl}`);
+        await page.goto(firstProductUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+        await this.safeWait(page, 5000);
+
+        console.log(`🌍 [Playwright] (batch) Ülke ve para birimi seçimi yapılıyor: ${targetCountry}`);
+        const countrySelectionResult = await this.selectCountryAndCurrency(page, targetCountry, sourceMarketplace, firstProductUrl);
+        if (!countrySelectionResult.success) {
+          console.warn(`⚠️ [Playwright] (batch) Ülke/para birimi seçimi başarısız: ${countrySelectionResult.error}`);
+        } else {
+          console.log(`✅ [Playwright] (batch) Ülke/para birimi seçimi tamamlandı`);
+        }
+      }
+
+      const items = [];
+
+      for (let idx = 0; idx < asinList.length; idx++) {
+        const asin = asinList[idx];
+        console.log(`🧾 [Playwright] (batch) ${idx + 1}/${asinList.length} işleniyor: ${asin}`);
+
+        const productUrl = `${baseUrl}/dp/${asin}`;
+        await page.goto(productUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+        await this.safeWait(page, 3000);
+
+        // Buybox (isteğe bağlı ama mevcut response yapısı için tutuluyor)
+        let buyboxData = null;
+        try {
+          buyboxData = await this.extractBuyboxData(page);
+        } catch (e) {
+          buyboxData = null;
+        }
+
+        // AOD sabit link formatı
+        const aodUrl = `${baseUrl}/dp/${asin}/ref=olp-opf-redir?aod=1&ie=UTF8&condition=NEW&th=1`;
+        console.log(`🔗 [Playwright] (batch) AOD sayfasına gidiliyor: ${aodUrl}`);
+        await page.goto(aodUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+        await this.safeWait(page, 2500);
+
+        // Captcha kontrolü
+        try {
+          const urlNow = page.url();
+          const bodyText = await page.textContent('body').catch(() => '');
+          const isCaptchaPage = urlNow.includes('/errors/validateCaptcha') || bodyText.includes('Click the button below to continue shopping');
+          if (isCaptchaPage) {
+            console.warn(`⚠️ [Playwright] (batch) Captcha sayfası tespit edildi, Continue shopping tıklanıyor...`);
+            const btnSelectors = [
+              'button[alt="Continue shopping"]',
+              'form[action="/errors/validateCaptcha"] button[type="submit"]',
+              'form[action="/errors/validateCaptcha"] button',
+              'button:has-text("Continue shopping")',
+              'button[type="submit"]'
+            ];
+            for (const sel of btnSelectors) {
+              try {
+                const btn = await page.$(sel).catch(() => null);
+                if (btn) {
+                  await btn.click({ timeout: 30000 }).catch(() => btn.click({ force: true, timeout: 30000 }));
+                  await this.safeWait(page, 3000);
+                  break;
+                }
+              } catch (e) {
+                continue;
+              }
+            }
+          }
+        } catch (e) {
+          // devam
+        }
+
+        // AOD container bekle
+        await page
+          .waitForSelector('#all-offers-display, #aod-container, #aod-offer-list, #aod-offer, #aod-pinned-offer', {
+            timeout: 20000,
+            state: 'visible'
+          })
+          .catch(() => {});
+        await this.safeWait(page, 1000);
+
+        // Pinned offer "See more"
+        try {
+          const seeMoreLink = await page.$('#aod-pinned-offer-show-more-link').catch(() => null);
+          if (seeMoreLink) {
+            await seeMoreLink.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {});
+            await this.safeWait(page, 300);
+            await seeMoreLink.click({ timeout: 10000 }).catch(() => {});
+            await this.safeWait(page, 1500);
+          }
+        } catch (e) {
+          // devam
+        }
+
+        const sellers = [];
+
+        try {
+          const pinnedOffer = await page.$('#aod-pinned-offer').catch(() => null);
+          if (pinnedOffer) {
+            const pinnedSellerData = await this.extractSellerDataFromOffer(page, pinnedOffer, 0, true);
+            if (pinnedSellerData) sellers.push(pinnedSellerData);
+          }
+        } catch (e) {
+          // devam
+        }
+
+        try {
+          const offerElements = await page.$$('#aod-offer, div[id^="aod-offer-"]');
+          for (let i = 0; i < offerElements.length; i++) {
+            const offer = offerElements[i];
+            try {
+              await offer.click().catch(() => {});
+              await this.safeWait(page, 400);
+              const sellerData = await this.extractSellerDataFromOffer(page, offer, i + 1, false);
+              if (sellerData) sellers.push(sellerData);
+            } catch (e) {
+              continue;
+            }
+          }
+        } catch (e) {
+          // devam
+        }
+
+        // Buybox'ı başa ekle (varsa ve listede yoksa)
+        if (buyboxData) {
+          const buyboxExists = sellers.some(s => {
+            const sName = (s.sellerName || s.soldBy || '').toLowerCase().trim();
+            const bName = (buyboxData.sellerName || buyboxData.soldBy || '').toLowerCase().trim();
+            return sName && bName && sName === bName && s.isBuybox === true;
+          });
+          if (!buyboxExists) sellers.unshift(buyboxData);
+        }
+
+        items.push({
+          asin,
+          sourceMarketplace,
+          targetCountry,
+          totalSellers: sellers.length,
+          sellers,
+          buybox: buyboxData || null
+        });
+      }
+
+      return {
+        success: true,
+        data: {
+          sourceMarketplace,
+          targetCountry,
+          totalItems: items.length,
+          items
+        },
+        error: null,
+        status: 200
+      };
+    } catch (error) {
+      console.error(`❌ [Playwright] Batch seller bilgileri çekilirken hata:`, error.message);
+      return { success: false, data: null, error: error.message, status: 500 };
+    } finally {
+      try {
+        if (page && !page.isClosed()) {
+          await page.close();
+        }
+      } catch (e) {
+        // ignore
+      }
+      try {
+        if (browser) {
+          await browser.close();
+        }
+      } catch (e) {
+        // ignore
       }
     }
   }

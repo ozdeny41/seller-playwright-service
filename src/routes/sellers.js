@@ -36,6 +36,8 @@ class RequestQueue {
     this.processing = true;
     this.running++;
     const { fn, resolve, reject } = this.queue.shift();
+    let isEAGAINError = false;
+    let exponentialDelay = 0;
 
     try {
       const result = await fn();
@@ -53,30 +55,27 @@ class RequestQueue {
                       errorString.includes('Failed to launch');
       
       if (isEAGAIN) {
+        isEAGAINError = true;
         this.lastEAGAINTime = Date.now();
         this.eagainCount++;
         console.error(`🚫 [Queue] EAGAIN hatası (${this.eagainCount}. kez) - Railway kaynak limiti aşıldı. Queue durduruluyor, daha uzun bekleniyor...`);
         
         const baseDelay = 120000; // 120 saniye (2 dakika)
-        const exponentialDelay = Math.min(baseDelay * Math.pow(2, this.eagainCount - 1), 600000); // Max 600 saniye (10 dakika)
+        exponentialDelay = Math.min(baseDelay * Math.pow(2, this.eagainCount - 1), 600000); // Max 600 saniye (10 dakika)
         
         console.error(`🚫 [Queue] ${Math.round(exponentialDelay/1000)} saniye bekleniyor (EAGAIN count: ${this.eagainCount})...`);
-        
-        setTimeout(() => {
-          this.running--;
-          this.processing = false;
-          this.process();
-        }, exponentialDelay);
-        
         reject(error);
-        return;
+      } else {
+        reject(error);
       }
-      
-      reject(error);
     } finally {
-      if (!this.processing) {
-        this.running--;
-        this.processing = false;
+      // KRİTİK: Queue'nun takılmaması için flag'leri her durumda resetle
+      this.running--;
+      this.processing = false;
+
+      if (isEAGAINError) {
+        setTimeout(() => this.process(), exponentialDelay || 120000);
+      } else {
         const delay = this.eagainCount > 0 ? 120000 : 60000; // EAGAIN varsa 120s, yoksa 60s
         setTimeout(() => this.process(), delay);
       }
@@ -93,17 +92,21 @@ const requestQueue = new RequestQueue(1);
  */
 router.post('/', async (req, res, next) => {
   try {
-    const { asin, sourceMarketplace = 'amazon.com', targetCountry } = req.body;
+    const { asin, asins, sourceMarketplace = 'amazon.com', targetCountry } = req.body;
+    const asinList = Array.isArray(asins)
+      ? asins.map(a => String(a || '').trim()).filter(Boolean)
+      : (asin ? [String(asin).trim()].filter(Boolean) : []);
     
     console.log(`📥 [Playwright Service] POST /api/sellers request alındı:`, {
       asin: asin,
+      asinCount: asinList.length,
       sourceMarketplace: sourceMarketplace,
       targetCountry: targetCountry,
       bodyKeys: Object.keys(req.body),
-      hasAsin: !!asin
+      hasAsin: asinList.length > 0
     });
     
-    if (!asin) {
+    if (asinList.length === 0) {
       console.warn(`⚠️ [Playwright Service] ASIN eksik, 400 döndürülüyor`);
       return res.status(400).json({ 
         ok: false, 
@@ -111,14 +114,17 @@ router.post('/', async (req, res, next) => {
       });
     }
     
-    console.log(`📡 [Playwright Service] Seller info request başlatılıyor: ${asin} from ${sourceMarketplace}`);
+    console.log(`📡 [Playwright Service] Seller info request başlatılıyor: ${asinList[0]} (${asinList.length} ASIN) from ${sourceMarketplace}`);
     console.log(`📊 [Queue] Queue durumu: ${requestQueue.running}/${requestQueue.maxConcurrent} çalışıyor, ${requestQueue.queue.length} bekliyor`);
     
     // KRİTİK: Queue'ya ekle - EAGAIN hatalarını önlemek için
     const result = await requestQueue.add(async () => {
-      console.log(`🚀 [Queue] ${asin} için seller bilgileri çekiliyor (${requestQueue.running}/${requestQueue.maxConcurrent}, queue: ${requestQueue.queue.length})`);
+      console.log(`🚀 [Queue] ${asinList[0]} (${asinList.length} ASIN) için seller bilgileri çekiliyor (${requestQueue.running}/${requestQueue.maxConcurrent}, queue: ${requestQueue.queue.length})`);
       try {
-        return await playwrightService.getSellerInfo(asin, sourceMarketplace, targetCountry);
+        if (asinList.length > 1) {
+          return await playwrightService.getSellerInfoBatch(asinList, sourceMarketplace, targetCountry);
+        }
+        return await playwrightService.getSellerInfo(asinList[0], sourceMarketplace, targetCountry);
       } catch (error) {
         const errorString = error.message || error.toString() || '';
         const isEAGAIN = error.isEAGAIN || 
@@ -128,7 +134,7 @@ router.post('/', async (req, res, next) => {
                         errorString.includes('Failed to launch');
         
         if (isEAGAIN) {
-          console.error(`❌ [Queue] ${asin} için seller bilgileri EAGAIN hatası - Railway kaynak limiti aşıldı`);
+          console.error(`❌ [Queue] ${asinList[0]} için seller bilgileri EAGAIN hatası - Railway kaynak limiti aşıldı`);
           throw {
             ...error,
             isEAGAIN: true,
@@ -143,6 +149,7 @@ router.post('/', async (req, res, next) => {
       success: result.success,
       hasData: !!result.data,
       sellersCount: result.data?.sellers?.length || 0,
+      itemsCount: result.data?.items?.length || 0,
       error: result.error || null
     });
     
