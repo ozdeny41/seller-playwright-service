@@ -122,70 +122,193 @@ class PlaywrightService {
       const baseDomain = marketplaceDomain[sourceMarketplace] || 'www.amazon.com';
       const baseUrl = `https://${baseDomain}`;
       console.log(`🌐 [Playwright] Marketplace domain: ${baseUrl} (source: ${sourceMarketplace})`);
+      
+      // KRİTİK: Sayfa yüklendikten sonra ekstra bekleme - kısaltıldı
+      await this.safeWait(page, 1000); // 3s -> 1s
+      console.log(`⏳ [Playwright] Sayfa yükleme sonrası bekleme tamamlandı, captcha kontrolü yapılıyor...`);
 
-      // KRİTİK: Sayfa yüklendikten sonra ekstra bekleme (seller-playwright-service'teki gibi)
-      // Sayfa tam yüklenmesi için bekle
-      await this.safeWait(page, 5000);
-      console.log(`⏳ [Playwright] Sayfa yükleme sonrası bekleme tamamlandı, "Deliver to" butonu aranıyor...`);
+      // KRİTİK: Amazon captcha sayfası kontrolü - eğer captcha sayfasındaysa "Continue shopping" butonuna tıkla
+      try {
+        // Captcha sayfası göstergeleri - birden fazla kontrol
+        const currentUrl = page.url();
+        const isCaptchaPage = currentUrl.includes('/errors/validateCaptcha');
+        const captchaForm = await page.$('form[action="/errors/validateCaptcha"]').catch(() => null);
+        
+        // Continue shopping butonunu bul - farklı selector'lar dene
+        let continueShoppingButton = null;
+        const buttonSelectors = [
+          'button[alt="Continue shopping"]',
+          'form[action="/errors/validateCaptcha"] button[type="submit"]',
+          'form[action="/errors/validateCaptcha"] button',
+          'button:has-text("Continue shopping")',
+          'button[type="submit"]'
+        ];
+        
+        for (const selector of buttonSelectors) {
+          try {
+            continueShoppingButton = await page.$(selector).catch(() => null);
+            if (continueShoppingButton) {
+              const buttonText = await continueShoppingButton.textContent().catch(() => '');
+              if (buttonText && (buttonText.includes('Continue') || buttonText.includes('shopping') || selector.includes('submit'))) {
+                console.log(`✅ [Playwright] Continue shopping butonu bulundu: ${selector}`);
+                break;
+              }
+            }
+          } catch (e) {
+            continue;
+          }
+        }
+        
+        // Text içeriğini de kontrol et
+        const captchaText = await page.textContent('body').catch(() => '');
+        const hasCaptchaText = captchaText.includes('Click the button below to continue shopping') || 
+                              captchaText.includes('continue shopping') ||
+                              captchaText.includes('Continue shopping');
+        
+        if (captchaForm || isCaptchaPage || continueShoppingButton || hasCaptchaText) {
+          console.log(`⚠️ [Playwright] Amazon captcha sayfası tespit edildi (form: ${!!captchaForm}, URL: ${isCaptchaPage}, button: ${!!continueShoppingButton}, text: ${hasCaptchaText}), "Continue shopping" butonuna tıklanıyor...`);
+          
+          if (continueShoppingButton) {
+            try {
+              await continueShoppingButton.scrollIntoViewIfNeeded();
+              await this.safeWait(page, 500);
+              await continueShoppingButton.click({ timeout: 30000 });
+              console.log(`✅ [Playwright] "Continue shopping" butonuna tıklandı, sayfa yüklenmesi bekleniyor...`);
+              
+              // Sayfa yüklenmesini bekle - timeout kısaltıldı
+              await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => { // 30s -> 10s
+                console.warn(`⚠️ [Playwright] Network idle bekleme timeout, devam ediliyor...`);
+              });
+              await this.safeWait(page, 2000); // 5s -> 2s
+              
+              // Sayfa URL'ini tekrar kontrol et - eğer hala captcha sayfasındaysa tekrar dene
+              const newUrl = page.url();
+              if (newUrl.includes('/errors/validateCaptcha')) {
+                console.warn(`⚠️ [Playwright] Hala captcha sayfasında, tekrar deneniyor...`);
+                await this.safeWait(page, 3000);
+                
+                // Tekrar butonu bul ve tıkla
+                for (const selector of buttonSelectors) {
+                  try {
+                    const retryButton = await page.$(selector).catch(() => null);
+                    if (retryButton) {
+                      const buttonText = await retryButton.textContent().catch(() => '');
+                      if (buttonText && (buttonText.includes('Continue') || buttonText.includes('shopping'))) {
+                        await retryButton.click({ timeout: 30000 });
+                        await this.safeWait(page, 5000);
+                        console.log(`✅ [Playwright] Retry butonuna tıklandı`);
+                        break;
+                      }
+                    }
+                  } catch (e) {
+                    continue;
+                  }
+                }
+              } else {
+                console.log(`✅ [Playwright] Captcha sayfasından çıkıldı, normal sayfaya yönlendirildi: ${newUrl}`);
+              }
+            } catch (captchaClickError) {
+              console.warn(`⚠️ [Playwright] Captcha butonuna tıklama hatası: ${captchaClickError.message}`);
+              // JavaScript ile tıklamayı dene
+              try {
+                const clicked = await page.evaluate(() => {
+                  const form = document.querySelector('form[action="/errors/validateCaptcha"]');
+                  if (form) {
+                    const btn = form.querySelector('button[type="submit"]') || 
+                               form.querySelector('button');
+                    if (btn) {
+                      btn.click();
+                      return true;
+                    }
+                  }
+                  return false;
+                });
+                if (clicked) {
+                  await this.safeWait(page, 5000);
+                  console.log(`✅ [Playwright] Captcha butonuna JavaScript ile tıklandı`);
+                }
+              } catch (jsError) {
+                console.warn(`⚠️ [Playwright] JavaScript click de başarısız: ${jsError.message}`);
+              }
+            }
+          } else if (captchaForm || isCaptchaPage) {
+            // Buton bulunamadı ama captcha sayfasındayız, form submit et
+            console.warn(`⚠️ [Playwright] Continue shopping butonu bulunamadı, form submit deneniyor...`);
+            try {
+              await page.evaluate(() => {
+                const form = document.querySelector('form[action="/errors/validateCaptcha"]');
+                if (form) form.submit();
+              });
+              await this.safeWait(page, 5000);
+              console.log(`✅ [Playwright] Captcha formu submit edildi`);
+            } catch (submitError) {
+              console.warn(`⚠️ [Playwright] Form submit hatası: ${submitError.message}`);
+            }
+          }
+        } else {
+          console.log(`ℹ️ [Playwright] Captcha sayfası tespit edilmedi, normal akışa devam ediliyor...`);
+        }
+      } catch (captchaCheckError) {
+        // Captcha kontrolü başarısız, normal akışa devam et
+        console.log(`ℹ️ [Playwright] Captcha kontrolü yapılamadı, normal akışa devam ediliyor: ${captchaCheckError.message}`);
+      }
 
       // "Deliver to" butonunu bul ve tıkla - DOM Path: #nav-global-location-popover-link
-      // KRİTİK: Sayfa yüklendikten sonra ekstra bekleme
-      await this.safeWait(page, 5000);
+      // KRİTİK: Sayfa yüklendikten sonra ekstra bekleme - kısaltıldı
+      await this.safeWait(page, 1000); // 3s -> 1s
       console.log(`⏳ [Playwright] Sayfa yükleme sonrası ekstra bekleme tamamlandı, "Deliver to" butonu aranıyor...`);
       
       // Network idle olmasını bekle (sayfa tam yüklensin) - timeout'u kısalt
       try {
-        await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {
+        await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => { // 10s -> 5s
           console.warn(`⚠️ [Playwright] Network idle bekleme timeout, devam ediliyor...`);
         });
       } catch (e) {
         console.warn(`⚠️ [Playwright] Network idle hatası: ${e.message}`);
       }
-      await this.safeWait(page, 3000);
+      await this.safeWait(page, 1000); // 3s -> 1s
       
       // KRİTİK: Sayfa title'ını kontrol et - eğer "Amazon.com" ise sayfa tam yüklenmemiş olabilir
       let pageTitle = await page.title().catch(() => '');
       let retryCount = 0;
       const maxTitleRetries = 3;
       
-      while ((pageTitle === 'Amazon.com' || pageTitle === 'Amazon' || !pageTitle) && retryCount < maxTitleRetries) {
-        console.warn(`⚠️ [Playwright] Sayfa title sadece "Amazon.com" (retry ${retryCount + 1}/${maxTitleRetries}) - sayfa tam yüklenmemiş olabilir, ekstra bekleme...`);
-        await this.safeWait(page, 5000);
+      // KRİTİK: Retry mekanizmasını kaldır - çok uzun sürüyor, sadece 1 kez kontrol et
+      if (pageTitle === 'Amazon.com' || pageTitle === 'Amazon' || !pageTitle) {
+        console.warn(`⚠️ [Playwright] Sayfa title sadece "Amazon.com" - sayfa tam yüklenmemiş olabilir, ekstra bekleme...`);
+        await this.safeWait(page, 2000); // 5s -> 2s
         
-        // Sayfayı yeniden yükle
+        // Sayfayı yeniden yükle (sadece 1 kez)
         try {
-          await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
-          await this.safeWait(page, 5000);
-          console.log(`✅ [Playwright] Sayfa yeniden yüklendi (retry ${retryCount + 1})`);
+          await page.reload({ waitUntil: 'domcontentloaded', timeout: 30000 }); // 60s -> 30s
+          await this.safeWait(page, 2000); // 5s -> 2s
+          console.log(`✅ [Playwright] Sayfa yeniden yüklendi`);
           
           // Title'ı tekrar kontrol et
           pageTitle = await page.title().catch(() => '');
           if (pageTitle !== 'Amazon.com' && pageTitle !== 'Amazon' && pageTitle) {
             console.log(`✅ [Playwright] Sayfa title düzeldi: "${pageTitle}"`);
-            break;
           }
         } catch (reloadError) {
           console.warn(`⚠️ [Playwright] Sayfa reload hatası: ${reloadError.message}`);
         }
-        
-        retryCount++;
       }
       
-      // KRİTİK: Eğer hala title "Amazon.com" ise, sayfanın tam yüklenmesi için ekstra bekleme
+      // KRİTİK: Eğer hala title "Amazon.com" ise, sayfanın tam yüklenmesi için ekstra bekleme - kısaltıldı
       if (pageTitle === 'Amazon.com' || pageTitle === 'Amazon' || !pageTitle) {
         console.warn(`⚠️ [Playwright] Sayfa title hala "Amazon.com" - sayfa tam yüklenmemiş olabilir, ekstra bekleme ve scroll...`);
-        await this.safeWait(page, 10000);
+        await this.safeWait(page, 3000); // 10s -> 3s
         
         // Sayfayı scroll et - navbar'ın yüklenmesi için
         try {
           await page.evaluate(() => {
             window.scrollTo(0, 0);
           });
-          await this.safeWait(page, 2000);
+          await this.safeWait(page, 1000); // 2s -> 1s
           await page.evaluate(() => {
             window.scrollTo(0, 100);
           });
-          await this.safeWait(page, 2000);
+          await this.safeWait(page, 1000); // 2s -> 1s
           console.log(`✅ [Playwright] Sayfa scroll edildi (navbar yüklenmesi için)`);
         } catch (scrollError) {
           console.warn(`⚠️ [Playwright] Scroll hatası: ${scrollError.message}`);
@@ -207,7 +330,13 @@ class PlaywrightService {
         '#nav-global-location-slot',
         '[data-csa-c-slot-id="nav-global-location"]',
         'a[href*="glow=change-country"]',
-        'span[data-action="a-popover-trigger"]'
+        'span[data-action="a-popover-trigger"]',
+        // Fallback: PDP içindeki delivery/location tetikleyicileri (navbar bazen render olmuyor)
+        '#contextualIngressPt',
+        '#contextualIngressPtLabel',
+        '#contextualIngressPtLabel_deliveryShortLine',
+        '#contextualIngressPtLabel_deliveryLongLine',
+        '[data-action*="GLUX"]'
       ];
       
       let deliverToButton = null;
@@ -271,18 +400,44 @@ class PlaywrightService {
       // KRİTİK: Eğer hala bulunamadıysa, sayfanın tam yüklenmesi için ekstra bekleme ve tekrar dene
       if (!deliverToButton) {
         console.log(`⏳ [Playwright] "Deliver to" butonu hala bulunamadı, sayfa tam yüklenmesi için ekstra bekleme...`);
-        await this.safeWait(page, 10000);
         
-        // Sayfayı scroll et ve tekrar ara
+        // KRİTİK: Navbar'ın render olması için sayfayı scroll et ve bekle
         try {
           await page.evaluate(() => {
             window.scrollTo(0, 0);
-            // Navbar'ın yüklenmesi için biraz bekle
-            return new Promise(resolve => setTimeout(resolve, 2000));
           });
+          await this.safeWait(page, 2000);
+          
+          // Navbar container'ının yüklenmesini bekle
+          try {
+            await page.waitForSelector('#nav-global-location-slot, #nav-belt, #navbar', { 
+              timeout: 15000, 
+              state: 'attached' 
+            });
+            console.log(`✅ [Playwright] Navbar container yüklendi`);
+          } catch (e) {
+            console.warn(`⚠️ [Playwright] Navbar container bekleme timeout`);
+          }
+          
           await this.safeWait(page, 3000);
           
-          // Tüm selector'ları tekrar dene
+          // JavaScript ile navbar'ı kontrol et
+          const navbarExists = await page.evaluate(() => {
+            const navbar = document.querySelector('#nav-global-location-popover-link');
+            return navbar !== null;
+          });
+          
+          if (navbarExists) {
+            console.log(`✅ [Playwright] Navbar JavaScript ile tespit edildi, tekrar aranıyor...`);
+          }
+        } catch (scrollError) {
+          console.warn(`⚠️ [Playwright] Scroll/check hatası: ${scrollError.message}`);
+        }
+        
+        await this.safeWait(page, 5000);
+        
+        // Tüm selector'ları tekrar dene
+        try {
           for (const selector of deliverToSelectors) {
             try {
               const element = await page.$(selector);
@@ -398,10 +553,14 @@ class PlaywrightService {
       
       // Popover açılmasını bekle
       console.log(`🎭 [Playwright] Popover açılması bekleniyor...`);
-      await page.waitForSelector('#a-popover-3, .a-popover-wrapper, #GLUX_Popover', { timeout: 15000 }).catch(() => {
+      // KRİTİK: Popover açılmasını bekle (#a-popover-3 veya #a-popover-4) - timeout kısaltıldı
+      try {
+        await page.waitForSelector('#a-popover-3, #a-popover-4, .a-popover-wrapper, #GLUX_Popover', { timeout: 5000, state: 'visible' }); // 15s -> 5s
+        console.log(`✅ [Playwright] Popover açıldı`);
+      } catch (popoverError) {
         console.warn(`⚠️ [Playwright] Popover selector bulunamadı, devam ediliyor...`);
-      });
-      await this.safeWait(page, 2000);
+      }
+      await this.safeWait(page, 1000); // 2s -> 1s
       
       // Ülke dropdown'unu bul ve aç
       console.log(`🎭 [Playwright] Ülke dropdown'u aranıyor: ${targetCountryCode}...`);
@@ -415,7 +574,7 @@ class PlaywrightService {
       let countryDropdown = null;
       for (const selector of dropdownSelectors) {
         try {
-          countryDropdown = await page.waitForSelector(selector, { timeout: 15000, state: 'visible' });
+          countryDropdown = await page.waitForSelector(selector, { timeout: 5000, state: 'visible' }); // 15s -> 5s
           if (countryDropdown) {
             console.log(`✅ [Playwright] Ülke dropdown bulundu: ${selector}`);
             break;
@@ -429,36 +588,23 @@ class PlaywrightService {
         throw new Error('Country dropdown not found');
       }
       
-      // Dropdown'u aç (tıkla)
+      // Dropdown'u aç (tıkla) - timeout kısaltıldı
       try {
-        await countryDropdown.click({ timeout: 30000 });
-        await this.safeWait(page, 2000);
+        await countryDropdown.click({ timeout: 10000 }); // 30s -> 10s
+        await this.safeWait(page, 1000); // 2s -> 1s
         console.log(`✅ [Playwright] Dropdown açıldı`);
       } catch (clickError) {
         console.warn(`⚠️ [Playwright] Dropdown click başarısız, force click deneniyor: ${clickError.message}`);
-        await countryDropdown.click({ force: true, timeout: 30000 });
-        await this.safeWait(page, 2000);
+        await countryDropdown.click({ force: true, timeout: 10000 }); // 30s -> 10s
+        await this.safeWait(page, 1000); // 2s -> 1s
       }
       
       // KRİTİK: Dropdown açıldıktan sonra ülkenin baş harfine basarak filtreleme yap
       // Navbar'da hangi ülke seçili ise o ülkenin baş harfi seçilerek yapılmalı
       let firstLetter = null;
-      try {
-        // Navbar'dan seçili ülke adını al (#glow-ingress-line2)
-        const selectedCountryElement = await page.$('#glow-ingress-line2');
-        if (selectedCountryElement) {
-          const selectedCountryText = await selectedCountryElement.textContent();
-          if (selectedCountryText && selectedCountryText.trim()) {
-            firstLetter = selectedCountryText.trim().charAt(0).toUpperCase();
-            console.log(`🌍 [Playwright] Navbar'dan seçili ülke bulundu: "${selectedCountryText.trim()}", baş harf: "${firstLetter}"`);
-          }
-        }
-      } catch (navbarError) {
-        console.warn(`⚠️ [Playwright] Navbar'dan ülke okunamadı: ${navbarError.message}, targetCountryName kullanılıyor...`);
-      }
-      
-      // Eğer navbar'dan okunamadıysa, targetCountryName'den baş harfi al
-      if (!firstLetter && targetCountryName) {
+      // KRİTİK: Navbar'daki mevcut ülke (örn: Netherlands) bazen hedef ülke değil.
+      // Bu yüzden filtrelemeyi HER ZAMAN hedef ülkenin baş harfiyle yap.
+      if (targetCountryName) {
         firstLetter = targetCountryName.charAt(0).toUpperCase();
         console.log(`🌍 [Playwright] TargetCountryName'den baş harf alındı: "${firstLetter}" (${targetCountryName})`);
       }
@@ -466,15 +612,26 @@ class PlaywrightService {
       // Dropdown açıldıktan sonra ülkenin baş harfine bas
       if (firstLetter) {
         try {
-          // Popover'ın açıldığından emin ol
-          await page.waitForSelector('#a-popover-4, ul.a-list-item', { timeout: 5000, state: 'visible' }).catch(() => {
-            console.warn(`⚠️ [Playwright] Popover hemen bulunamadı, devam ediliyor...`);
+          // KRİTİK: Popover içindeki liste görünür olana kadar bekle - timeout kısaltıldı
+          await page.waitForSelector('#a-popover-4 ul.a-list-item, ul.a-list-item', { timeout: 3000, state: 'visible' }).catch(() => { // 5s -> 3s
+            console.warn(`⚠️ [Playwright] Liste hemen görünür olmadı, devam ediliyor...`);
           });
-          await this.safeWait(page, 500);
+          await this.safeWait(page, 300); // 500ms -> 300ms
+          
+          // KRİTİK: Popover içine focus yap (klavye input'unun çalışması için)
+          try {
+            const popover = await page.$('#a-popover-4');
+            if (popover) {
+              await popover.focus();
+              await this.safeWait(page, 200); // 300ms -> 200ms
+            }
+          } catch (focusError) {
+            console.warn(`⚠️ [Playwright] Popover focus başarısız: ${focusError.message}`);
+          }
           
           // Ülkenin baş harfine bas
           await page.keyboard.press(firstLetter);
-          await this.safeWait(page, 1000); // Filtreleme için bekle
+          await this.safeWait(page, 800); // 1500ms -> 800ms (filtreleme için daha kısa bekle)
           console.log(`⌨️ [Playwright] Dropdown açıldı, "${firstLetter}" harfine basıldı, ülke filtreleniyor...`);
         } catch (keyboardError) {
           console.warn(`⚠️ [Playwright] Keyboard press hatası: ${keyboardError.message}, devam ediliyor...`);
@@ -486,12 +643,23 @@ class PlaywrightService {
       // Ülke seçeneğini bul ve tıkla
       console.log(`🎭 [Playwright] Ülke seçeneği aranıyor: ${amazonCountryCode} (${targetCountryName})...`);
       
-      const allOptions = await page.$$eval('a[data-value]', (options) => {
+      // KRİTİK: Popover içindeki seçenekleri al (#a-popover-4 içinde)
+      // Önce popover içindeki liste görünür olana kadar bekle
+      try {
+        await page.waitForSelector('#a-popover-4 ul.a-list-item a[data-value], ul.a-list-item a[data-value]', { timeout: 5000, state: 'visible' });
+        console.log(`✅ [Playwright] Popover içindeki liste görünür`);
+      } catch (listError) {
+        console.warn(`⚠️ [Playwright] Liste hemen görünür olmadı, devam ediliyor...`);
+      }
+      
+      const allOptions = await page.$$eval('#a-popover-4 a[data-value], ul.a-list-item a[data-value], a[data-value]', (options) => {
         return options.map(opt => ({
           text: opt.textContent.trim(),
           value: opt.getAttribute('data-value'),
-          id: opt.id
-        }));
+          id: opt.id,
+          href: opt.getAttribute('href') || '',
+          visible: opt.offsetParent !== null // Element görünür mü?
+        })).filter(opt => opt.visible); // Sadece görünür seçenekleri al
       });
       console.log(`🔍 [Playwright] Mevcut ülke seçenekleri: ${allOptions.length} adet`);
       
@@ -524,14 +692,22 @@ class PlaywrightService {
       // Ülke seçeneğini bul ve tıkla - öncelikli: data-value exact match (ID'ler filtreleme sonrası yanlış olabilir)
       const countryOptionSelectors = [];
       
-      // KRİTİK: Önce data-value ile exact match (filtreleme sonrası ID'ler değişebilir)
+      // KRİTİK: Önce popover içinde data-value ile exact match (#a-popover-4 içinde)
+      countryOptionSelectors.push(`#a-popover-4 a[data-value="${foundOption.value}"]`);
+      countryOptionSelectors.push(`ul.a-list-item a[data-value="${foundOption.value}"]`);
+      
+      // Fallback: Genel data-value match
       countryOptionSelectors.push(`a[data-value="${foundOption.value}"]`);
       
       // Fallback: text match (ama ID kullanma - filtreleme sonrası yanlış olabilir)
+      countryOptionSelectors.push(`#a-popover-4 a:has-text("${foundOption.text}")`);
+      countryOptionSelectors.push(`ul.a-list-item a:has-text("${foundOption.text}")`);
       countryOptionSelectors.push(`a:has-text("${foundOption.text}")`);
       
       // KRİTİK: ID'leri en sona koy (filtreleme sonrası yanlış olabilir)
       if (foundOption.id) {
+        countryOptionSelectors.push(`#a-popover-4 a#${foundOption.id}`);
+        countryOptionSelectors.push(`ul.a-list-item a#${foundOption.id}`);
         countryOptionSelectors.push(`a#${foundOption.id}`);
         console.log(`🔍 [Playwright] Bulunan ID fallback olarak eklendi: a#${foundOption.id} (filtreleme sonrası yanlış olabilir)`);
       }
@@ -539,7 +715,8 @@ class PlaywrightService {
       let countryOption = null;
       for (const selector of countryOptionSelectors) {
         try {
-          countryOption = await page.waitForSelector(selector, { timeout: 10000, state: 'visible' });
+          // KRİTİK: Sadece görünür elementleri bekle
+          countryOption = await page.waitForSelector(selector, { timeout: 8000, state: 'visible' });
           if (countryOption) {
             // KRİTİK: Seçilecek elementin text'ini ve data-value'sunu kontrol et - yanlış ülke seçilmesini önle
             const optionText = await countryOption.textContent().catch(() => '');
@@ -596,10 +773,14 @@ class PlaywrightService {
       // Done butonuna tıkla
       console.log(`🎭 [Playwright] "Done" butonu aranıyor...`);
       const doneButtonSelectors = [
+        'button#a-autoid-28-announce[name="glowDoneButton"]', // KRİTİK: Kullanıcının verdiği DOM path (B0G5C4GTGQ için)
+        'button#a-autoid-31-announce[name="glowDoneButton"]', // Alternatif ID
         'button[name="glowDoneButton"]',
         'button.a-button-text[name="glowDoneButton"]',
         'span.a-button-inner button[name="glowDoneButton"]',
-        'input[name="glowDoneButton"]'
+        'input[name="glowDoneButton"]',
+        '#a-autoid-28-announce', // Fallback: ID ile (B0G5C4GTGQ için)
+        '#a-autoid-31-announce' // Fallback: Alternatif ID
       ];
       
       let doneButton = null;
@@ -624,156 +805,167 @@ class PlaywrightService {
         await doneButton.scrollIntoViewIfNeeded();
         await this.safeWait(page, 500);
         await doneButton.click({ timeout: 30000 });
+        await this.safeWait(page, 2000); // Sayfa yeniden yüklenmesi için bekle
+        console.log(`✅ [Playwright] "Done" butonuna tıklandı, ülke seçimi tamamlandı`);
       } catch (clickError) {
         console.log(`⚠️ [Playwright] Normal click başarısız, JS click deneniyor: ${clickError.message}`);
         await page.evaluate(() => {
-          const btn = document.querySelector('button[name="glowDoneButton"]');
+          const btn = document.querySelector('button[name="glowDoneButton"]') || 
+                     document.querySelector('#a-autoid-28-announce') ||
+                     document.querySelector('#a-autoid-31-announce');
           if (btn) btn.click();
         });
+        await this.safeWait(page, 2000);
       }
-      await this.safeWait(page, 3000);
-      console.log(`✅ [Playwright] "Done" butonuna tıklandı, ülke seçimi tamamlandı`);
       
-      // Para birimi seçimi - customer-preferences sayfasına git
-      const preferencesUrl = asinUrl 
-        ? `${baseUrl}/customer-preferences/edit?ref_=icp_cop_flyout_change&preferencesReturnUrl=${encodeURIComponent(asinUrl)}`
-        : `${baseUrl}/customer-preferences/edit?ref_=icp_cop_flyout_change`;
-      
-      console.log(`🔗 [Playwright] Customer preferences sayfasına gidiliyor: ${preferencesUrl}`);
-      await page.goto(preferencesUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
-      await this.safeWait(page, 3000);
-      
+      // KRİTİK: Sayfa yeniden yüklenecek, bunu bekle - timeout kısaltıldı
+      console.log(`⏳ [Playwright] Sayfa yeniden yüklenmesi bekleniyor (Done butonuna tıklandıktan sonra)...`);
       try {
-        // Para birimi dropdown butonunu bul ve tıkla
-        console.log(`💵 [Playwright] Para birimi dropdown butonu aranıyor...`);
-        const currencyDropdownButtonSelectors = [
-          'span#icp-currency-dropdown-selected-item-prompt span.a-button-text.a-declarative',
-          'span#icp-currency-dropdown-selected-item-prompt span.a-button-text',
-          'span#icp-currency-dropdown-selected-item-prompt',
-          'span.a-button-text[data-action="a-dropdown-button"]'
+        await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => { // 30s -> 10s
+          console.warn(`⚠️ [Playwright] Network idle bekleme timeout, devam ediliyor...`);
+        });
+        await this.safeWait(page, 1000); // 2s -> 1s
+        console.log(`✅ [Playwright] Sayfa yeniden yüklendi`);
+      } catch (loadError) {
+        console.warn(`⚠️ [Playwright] Sayfa yükleme bekleme hatası: ${loadError.message}, devam ediliyor...`);
+      }
+      
+      // KRİTİK: Para birimi seçimi customer-preferences sayfasından yapılmalı (aksi halde yanlış fiyatlar çekilebiliyor)
+      try {
+        const currentAsinUrl = asinUrl || page.url();
+        const preferencesReturnUrl = (() => {
+          try {
+            const u = new URL(currentAsinUrl);
+            return `${u.pathname}${u.search}`;
+          } catch (e) {
+            // Fallback: tam URL değilse /dp/... kısmını yakala
+            const idx = String(currentAsinUrl).indexOf('/dp/');
+            return idx >= 0 ? String(currentAsinUrl).slice(idx) : '/';
+          }
+        })();
+
+        const preferencesUrl = `${baseUrl}/customer-preferences/edit?ref_=icp_cop_flyout_change&preferencesReturnUrl=${encodeURIComponent(preferencesReturnUrl)}`;
+        console.log(`💵 [Playwright] Para birimi sayfasına gidiliyor: ${preferencesUrl}`);
+
+        await page.goto(preferencesUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+        await this.safeWait(page, 1500);
+
+        // Sayfa ana container'larını bekle
+        await page.waitForSelector('#international-customer-select-preferences-form, #icp-currency-settings, #icp-currency-dropdown-container', {
+          timeout: 15000,
+          state: 'attached'
+        }).catch(() => {
+          console.warn(`⚠️ [Playwright] customer-preferences container bekleme timeout, devam ediliyor...`);
+        });
+
+        // Mevcut para birimini oku
+        const currencyPromptSelectors = [
+          '#icp-currency-dropdown-container span.a-dropdown-prompt',
+          'span#icp-currency-dropdown-selected-item-prompt span.a-dropdown-prompt',
+          'span#icp-currency-dropdown-selected-item-prompt'
         ];
-        
-        let currencyDropdownButton = null;
-        for (const selector of currencyDropdownButtonSelectors) {
+        let currentCurrencyPromptText = '';
+        for (const selector of currencyPromptSelectors) {
           try {
-            await page.waitForSelector(selector, { timeout: 15000, state: 'visible' });
-            currencyDropdownButton = await page.$(selector);
-            if (currencyDropdownButton) {
-              console.log(`✅ [Playwright] Currency dropdown butonu bulundu: ${selector}`);
-              break;
+            const el = await page.$(selector);
+            if (el) {
+              const txt = await el.textContent().then(t => t.trim()).catch(() => '');
+              if (txt) {
+                currentCurrencyPromptText = txt;
+                break;
+              }
             }
           } catch (e) {
             continue;
           }
         }
-        
-        if (!currencyDropdownButton) {
-          throw new Error('Currency dropdown butonu bulunamadı');
+        if (currentCurrencyPromptText) {
+          console.log(`🔍 [Playwright] Mevcut para birimi prompt: "${currentCurrencyPromptText}"`);
         }
-        
-        // Dropdown'u aç
-        try {
-          await currencyDropdownButton.scrollIntoViewIfNeeded();
-          await this.safeWait(page, 500);
-          await currencyDropdownButton.click({ timeout: 30000 });
-          await this.safeWait(page, 2000);
-          console.log(`✅ [Playwright] Para birimi dropdown açıldı`);
-        } catch (clickError) {
-          console.warn(`⚠️ [Playwright] Dropdown click başarısız, force click deneniyor: ${clickError.message}`);
-          await currencyDropdownButton.click({ force: true, timeout: 30000 });
-          await this.safeWait(page, 2000);
-        }
-        
-        // Popover açılmasını bekle
-        await page.waitForSelector('#a-popover-1, .a-popover-wrapper', { timeout: 10000 }).catch(() => {
-          console.warn(`⚠️ [Playwright] Popover selector bulunamadı, devam ediliyor...`);
-        });
-        await this.safeWait(page, 1000);
-        
-        // Para birimi seçeneğini bul ve tıkla
-        console.log(`💵 [Playwright] Para birimi seçeneği aranıyor: ${targetCurrency}...`);
-        
-        const allCurrencyOptions = await page.$$eval('a[data-value]', (options) => {
-          return options.map(opt => ({
-            text: opt.textContent.trim(),
-            value: opt.getAttribute('data-value'),
-            id: opt.id
-          }));
-        });
-        console.log(`🔍 [Playwright] Para birimi seçenekleri bulundu: ${allCurrencyOptions.length} adet`);
-        
-        let foundCurrencyOption = null;
-        for (const opt of allCurrencyOptions) {
-          try {
-            const valueObj = JSON.parse(opt.value);
-            if (valueObj.stringVal === targetCurrency || opt.text.includes(targetCurrency)) {
-              foundCurrencyOption = opt;
-              console.log(`✅ [Playwright] Para birimi seçeneği bulundu: ${opt.text} (${opt.value})`);
-              break;
-            }
-          } catch (e) {
-            // JSON parse başarısız, string içinde ara
-            if (opt.value && (opt.value.includes(targetCurrency) || opt.text.includes(targetCurrency))) {
-              foundCurrencyOption = opt;
-              console.log(`✅ [Playwright] Para birimi seçeneği bulundu (string match): ${opt.text}`);
-              break;
+
+        const isAlreadyCorrect = currentCurrencyPromptText
+          ? currentCurrencyPromptText.toUpperCase().includes(`- ${targetCurrency.toUpperCase()} -`) ||
+            currentCurrencyPromptText.toUpperCase().includes(` ${targetCurrency.toUpperCase()} `) ||
+            currentCurrencyPromptText.toUpperCase().includes(targetCurrency.toUpperCase())
+          : false;
+
+        if (!isAlreadyCorrect) {
+          // Dropdown'u aç
+          console.log(`💵 [Playwright] Para birimi dropdown açılıyor...`);
+          const dropdownOpenSelectors = [
+            '#icp-currency-dropdown-selected-item-prompt',
+            '#icp-currency-dropdown-container span.a-dropdown-prompt',
+            '#icp-currency-dropdown-container'
+          ];
+          let dropdownOpener = null;
+          for (const selector of dropdownOpenSelectors) {
+            try {
+              dropdownOpener = await page.waitForSelector(selector, { timeout: 10000, state: 'visible' });
+              if (dropdownOpener) {
+                break;
+              }
+            } catch (e) {
+              continue;
             }
           }
-        }
-        
-        if (!foundCurrencyOption) {
-          const sampleOptions = allCurrencyOptions.slice(0, 3).map(opt => opt.text);
-          throw new Error(`Para birimi seçeneği bulunamadı: ${targetCurrency}. Toplam ${allCurrencyOptions.length} seçenek var (örnek: ${sampleOptions.join(', ')})`);
-        }
-        
-        // Para birimi seçeneğini bul ve tıkla
-        const currencyOptionSelectors = [
-          foundCurrencyOption.id ? `a#${foundCurrencyOption.id}` : null,
-          `a[data-value="${foundCurrencyOption.value}"]`,
-          `li#${targetCurrency} a`,
-          `a:has-text("${targetCurrency}")`
-        ].filter(Boolean);
-        
-        let currencyOption = null;
-        for (const selector of currencyOptionSelectors) {
-          try {
-            currencyOption = await page.waitForSelector(selector, { timeout: 10000, state: 'visible' });
-            if (currencyOption) {
-              console.log(`✅ [Playwright] Para birimi seçeneği elementi bulundu: ${selector}`);
-              break;
-            }
-          } catch (e) {
-            continue;
+          if (!dropdownOpener) {
+            throw new Error('Currency dropdown opener bulunamadı');
           }
+
+          await dropdownOpener.scrollIntoViewIfNeeded().catch(() => {});
+          await this.safeWait(page, 300);
+          await dropdownOpener.click({ timeout: 30000 }).catch(async (e) => {
+            console.warn(`⚠️ [Playwright] Currency dropdown normal click başarısız, force click deneniyor: ${e.message}`);
+            await dropdownOpener.click({ force: true, timeout: 30000 });
+          });
+          await this.safeWait(page, 1000);
+
+          // Popover içinden para birimini seç
+          console.log(`💵 [Playwright] Para birimi seçeneği aranıyor: ${targetCurrency}...`);
+          const optionSelectors = [
+            `div.a-popover-wrapper li#${targetCurrency} a`,
+            `div.a-popover-wrapper li#${targetCurrency} span`,
+            `#a-popover-1 li#${targetCurrency} a`,
+            `#a-popover-1 li#${targetCurrency} span`,
+            `div.a-popover-wrapper a:has-text("${targetCurrency}")`,
+            `#a-popover-1 a:has-text("${targetCurrency}")`
+          ];
+          let optionEl = null;
+          for (const selector of optionSelectors) {
+            try {
+              optionEl = await page.waitForSelector(selector, { timeout: 15000, state: 'visible' });
+              if (optionEl) {
+                console.log(`✅ [Playwright] Para birimi seçeneği bulundu: ${selector}`);
+                break;
+              }
+            } catch (e) {
+              continue;
+            }
+          }
+          if (!optionEl) {
+            throw new Error(`Para birimi seçeneği bulunamadı: ${targetCurrency}`);
+          }
+
+          await optionEl.scrollIntoViewIfNeeded().catch(() => {});
+          await this.safeWait(page, 300);
+          await optionEl.click({ timeout: 30000 }).catch(async (e) => {
+            console.warn(`⚠️ [Playwright] Currency option normal click başarısız, force click deneniyor: ${e.message}`);
+            await optionEl.click({ force: true, timeout: 30000 });
+          });
+          await this.safeWait(page, 1200);
+          console.log(`✅ [Playwright] Para birimi seçildi: ${targetCurrency}`);
+        } else {
+          console.log(`✅ [Playwright] Para birimi zaten doğru: ${targetCurrency}`);
         }
-        
-        if (!currencyOption) {
-          throw new Error(`Para birimi seçeneği elementi bulunamadı: ${foundCurrencyOption.text}`);
-        }
-        
-        // Para birimi seçeneğine tıkla
-        try {
-          await currencyOption.scrollIntoViewIfNeeded();
-          await this.safeWait(page, 500);
-          await currencyOption.click({ timeout: 30000 });
-          await this.safeWait(page, 2000);
-          console.log(`✅ [Playwright] ${targetCurrency} para birimi seçildi`);
-        } catch (clickError) {
-          console.warn(`⚠️ [Playwright] Para birimi seçimi click başarısız, force click deneniyor: ${clickError.message}`);
-          await currencyOption.click({ force: true, timeout: 30000 });
-          await this.safeWait(page, 2000);
-        }
-        
-        // Save butonunu bul ve tıkla
+
+        // Save butonuna tıkla (değişiklik olmasa bile, Amazon bazen state'i apply ediyor)
         console.log(`💾 [Playwright] Save butonu aranıyor...`);
         const saveSelectors = [
           'span#icp-save-button input.a-button-input[type="submit"]',
-          'input.a-button-input[type="submit"]',
-          'input#icp-save-button',
+          'span#icp-save-button input.a-button-input',
           'span#icp-save-button input',
-          'input[type="submit"][id*="save"]'
+          'input.a-button-input[type="submit"][aria-labelledby="icp-save-button-announce"]'
         ];
-        
         let saveButton = null;
         for (const selector of saveSelectors) {
           try {
@@ -786,26 +978,41 @@ class PlaywrightService {
             continue;
           }
         }
-        
         if (!saveButton) {
           throw new Error('Save butonu bulunamadı');
         }
-        
-        // Save butonuna tıkla
-        try {
-          await saveButton.scrollIntoViewIfNeeded();
-          await this.safeWait(page, 500);
-          await saveButton.click({ timeout: 30000 });
-          await this.safeWait(page, 3000);
-          console.log(`✅ [Playwright] Para birimi kaydedildi`);
-        } catch (clickError) {
-          console.warn(`⚠️ [Playwright] Save click başarısız, force click deneniyor: ${clickError.message}`);
+
+        await saveButton.scrollIntoViewIfNeeded().catch(() => {});
+        await this.safeWait(page, 300);
+        await saveButton.click({ timeout: 30000 }).catch(async (e) => {
+          console.warn(`⚠️ [Playwright] Save normal click başarısız, force click deneniyor: ${e.message}`);
           await saveButton.click({ force: true, timeout: 30000 });
-          await this.safeWait(page, 3000);
+        });
+
+        // Save sonrası returnUrl'e yönlenmesini bekle
+        await page.waitForLoadState('domcontentloaded', { timeout: 30000 }).catch(() => {});
+        await this.safeWait(page, 1500);
+
+        // Eğer hala preferences sayfasındaysak, ASIN sayfasına dön
+        const afterUrl = page.url();
+        if (afterUrl.includes('/customer-preferences/') && asinUrl) {
+          console.log(`🔗 [Playwright] Save sonrası ASIN sayfasına geri dönülüyor: ${asinUrl}`);
+          await page.goto(asinUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+          await this.safeWait(page, 2000);
         }
       } catch (currencyError) {
         console.warn(`⚠️ [Playwright] Para birimi seçimi hatası: ${currencyError.message}`);
-        // Para birimi seçimi başarısız olsa bile devam et
+        // Hata olsa bile akışı durdurma; mümkünse ASIN sayfasına geri dön
+        try {
+          const urlNow = page.url();
+          if (urlNow.includes('/customer-preferences/') && asinUrl) {
+            console.log(`🔗 [Playwright] Para birimi hatası sonrası ASIN sayfasına geri dönülüyor: ${asinUrl}`);
+            await page.goto(asinUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+            await this.safeWait(page, 2000);
+          }
+        } catch (navError) {
+          console.warn(`⚠️ [Playwright] Para birimi hatası sonrası navigation hatası: ${navError.message}`);
+        }
       }
       
       return { success: true, error: null };
