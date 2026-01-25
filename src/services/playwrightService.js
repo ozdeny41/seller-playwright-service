@@ -2210,6 +2210,48 @@ class PlaywrightService {
                   }
                 }
               }
+              
+              // KRİTİK: Pinned offer için #aod-offer-seller-rating elementinden rating bilgilerini çek
+              if (!sellerRating || !sellerRatingCount || !positivePercentage) {
+                try {
+                  const ratingElement = await page.$('#aod-offer-seller-rating, span#seller-rating-count-0').catch(() => null);
+                  if (ratingElement) {
+                    const ratingText = await ratingElement.textContent().then(t => t.trim()).catch(() => null);
+                    if (ratingText) {
+                      console.log(`🔍 [Playwright] Pinned offer rating text: ${ratingText.substring(0, 200)}`);
+                      
+                      // Seller rating
+                      if (!sellerRating) {
+                        const ratingMatch = ratingText.match(/(?:Seller rating is\s+)?(\d+(?:\.\d+)?)\s+out of\s+5\s+stars/i);
+                        if (ratingMatch) {
+                          sellerRating = parseFloat(ratingMatch[1]);
+                          console.log(`✅ [Playwright] Pinned offer sellerRating #aod-offer-seller-rating'den çekildi: ${sellerRating}`);
+                        }
+                      }
+                      
+                      // Seller rating count
+                      if (!sellerRatingCount) {
+                        const ratingCountMatch = ratingText.match(/\((\d{1,3}(?:,\d{3})*|\d+)\s*(?:ratings?|değerlendirme)\)/i);
+                        if (ratingCountMatch) {
+                          sellerRatingCount = ratingCountMatch[1].replace(/,/g, '');
+                          console.log(`✅ [Playwright] Pinned offer sellerRatingCount #aod-offer-seller-rating'den çekildi: ${sellerRatingCount}`);
+                        }
+                      }
+                      
+                      // Positive percentage
+                      if (!positivePercentage) {
+                        const positiveMatch = ratingText.match(/(\d+(?:\.\d+)?)\s*%\s*positive/i);
+                        if (positiveMatch) {
+                          positivePercentage = parseFloat(positiveMatch[1]);
+                          console.log(`✅ [Playwright] Pinned offer positivePercentage #aod-offer-seller-rating'den çekildi: ${positivePercentage}%`);
+                        }
+                      }
+                    }
+                  }
+                } catch (ratingError) {
+                  console.warn(`⚠️ [Playwright] Pinned offer rating bilgileri çekilirken hata: ${ratingError.message}`);
+                }
+              }
             } catch (e) {
               console.warn(`⚠️ [Playwright] Offer ${index} soldBy sidebar'dan çekilemedi: ${e.message}`);
             }
@@ -2346,6 +2388,62 @@ class PlaywrightService {
                   if (positiveMatch) positivePercentage = parseFloat(positiveMatch[1]);
                 }
               }
+            }
+          }
+          
+          // KRİTİK: Satıcı değerlendirmelerini #aod-offer-seller-rating elementinden çek
+          // Pinned offer için: #aod-offer-seller-rating (global)
+          // Diğer offer'lar için: offer içinde #aod-offer-seller-rating veya #seller-rating-count-{iter}
+          if (!sellerRating || !sellerRatingCount || !positivePercentage) {
+            try {
+              let ratingElement = null;
+              if (isPinnedOffer) {
+                // Pinned offer için global selector
+                ratingElement = await page.$('#aod-offer-seller-rating').catch(() => null);
+              } else {
+                // Diğer offer'lar için: offer içinde veya global
+                ratingElement = await offerElement.$('#aod-offer-seller-rating, [id*="seller-rating"]').catch(() => null);
+                if (!ratingElement) {
+                  // Global selector'ı dene
+                  ratingElement = await page.$(`#aod-offer-seller-rating, #seller-rating-count-${index}`).catch(() => null);
+                }
+              }
+              
+              if (ratingElement) {
+                const ratingText = await ratingElement.textContent().then(t => t.trim()).catch(() => null);
+                if (ratingText) {
+                  console.log(`🔍 [Playwright] Offer ${index} rating text: ${ratingText.substring(0, 200)}`);
+                  
+                  // Seller rating - "Seller rating is 5 out of 5 stars" veya "5 out of 5 stars"
+                  if (!sellerRating) {
+                    const ratingMatch = ratingText.match(/(?:Seller rating is\s+)?(\d+(?:\.\d+)?)\s+out of\s+5\s+stars/i);
+                    if (ratingMatch) {
+                      sellerRating = parseFloat(ratingMatch[1]);
+                      console.log(`✅ [Playwright] Offer ${index} sellerRating #aod-offer-seller-rating'den çekildi: ${sellerRating}`);
+                    }
+                  }
+                  
+                  // KRİTİK: Seller rating count - "(33 ratings)" veya "(1 rating)" formatından çıkar
+                  if (!sellerRatingCount) {
+                    const ratingCountMatch = ratingText.match(/\((\d{1,3}(?:,\d{3})*|\d+)\s*(?:ratings?|değerlendirme)\)/i);
+                    if (ratingCountMatch) {
+                      sellerRatingCount = ratingCountMatch[1].replace(/,/g, '');
+                      console.log(`✅ [Playwright] Offer ${index} sellerRatingCount #aod-offer-seller-rating'den çekildi: ${sellerRatingCount}`);
+                    }
+                  }
+                  
+                  // KRİTİK: Positive percentage - "100% positive over last 12 months" formatından çıkar
+                  if (!positivePercentage) {
+                    const positiveMatch = ratingText.match(/(\d+(?:\.\d+)?)\s*%\s*positive/i);
+                    if (positiveMatch) {
+                      positivePercentage = parseFloat(positiveMatch[1]);
+                      console.log(`✅ [Playwright] Offer ${index} positivePercentage #aod-offer-seller-rating'den çekildi: ${positivePercentage}%`);
+                    }
+                  }
+                }
+              }
+            } catch (ratingError) {
+              console.warn(`⚠️ [Playwright] Offer ${index} rating bilgileri çekilirken hata: ${ratingError.message}`);
             }
           }
         }
@@ -3225,12 +3323,30 @@ class PlaywrightService {
       // Toplam satıcı sayısını bul
       let totalSellers = 0;
       try {
-        // "New & Used (6) from" formatından sayıyı çıkar
-        const newAndUsedText = await page.$eval('a#aod-ingress-link span.a-color-base', (el) => el.textContent.trim()).catch(() => '');
-        const match = newAndUsedText.match(/\((\d+)\)/);
-        if (match) {
-          totalSellers = parseInt(match[1], 10);
-          console.log(`✅ [Playwright] Toplam satıcı sayısı: ${totalSellers}`);
+        // Önce "#aod-filter-offer-count-string" elementinden sayıyı çıkar
+        // "2 other options" formatından sayıyı çıkar
+        const offerCountElement = await page.$('#aod-filter-offer-count-string').catch(() => null);
+        if (offerCountElement) {
+          const offerCountText = await offerCountElement.textContent().then(t => t.trim()).catch(() => '');
+          if (offerCountText) {
+            // "2 other options" veya "5 other options" formatından sayıyı çıkar
+            const match = offerCountText.match(/(\d+)\s+other\s+options?/i);
+            if (match) {
+              const otherOptions = parseInt(match[1], 10);
+              totalSellers = otherOptions + 1; // +1 for pinned offer
+              console.log(`✅ [Playwright] Toplam satıcı sayısı (#aod-filter-offer-count-string): ${totalSellers} (${otherOptions} other + 1 pinned)`);
+            }
+          }
+        }
+        
+        // Eğer bulunamadıysa, "New & Used (6) from" formatından sayıyı çıkar
+        if (!totalSellers || totalSellers === 0) {
+          const newAndUsedText = await page.$eval('a#aod-ingress-link span.a-color-base', (el) => el.textContent.trim()).catch(() => '');
+          const match = newAndUsedText.match(/\((\d+)\)/);
+          if (match) {
+            totalSellers = parseInt(match[1], 10);
+            console.log(`✅ [Playwright] Toplam satıcı sayısı (aod-ingress-link): ${totalSellers}`);
+          }
         }
       } catch (e) {
         console.warn(`⚠️ [Playwright] Toplam satıcı sayısı bulunamadı: ${e.message}`);
@@ -3282,6 +3398,23 @@ class PlaywrightService {
         for (let i = 0; i < offerElements.length; i++) {
           const offer = offerElements[i];
           try {
+            // KRİTİK: Her offer için önce "More" butonuna tıkla (eğer varsa)
+            // "More" butonu: a.a-link-normal.aod-delivery-morelink veya #aod-delivery-more-action > a
+            try {
+              // Offer içinde "More" butonunu bul
+              const moreButton = await offer.$('a.a-link-normal.aod-delivery-morelink, #aod-delivery-more-action > a, a[aria-label*="More"]').catch(() => null);
+              if (moreButton) {
+                console.log(`🔗 [Playwright] Seller ${i + 2} için "More" butonu bulundu, tıklanıyor...`);
+                await moreButton.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {});
+                await this.safeWait(page, 300);
+                await moreButton.click({ timeout: 10000 }).catch(() => {});
+                console.log(`✅ [Playwright] Seller ${i + 2} için "More" butonuna tıklandı`);
+                await this.safeWait(page, 1500); // Detayların yüklenmesi için bekle
+              }
+            } catch (moreError) {
+              console.warn(`⚠️ [Playwright] Seller ${i + 2} için "More" butonuna tıklanamadı: ${moreError.message}`);
+            }
+            
             // Her offer için sidebar'dan bilgileri çek (index'e göre selector'lar kullanılacak)
             await offer.click().catch(() => {});
             await this.safeWait(page, 500);
