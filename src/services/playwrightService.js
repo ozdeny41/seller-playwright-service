@@ -3371,6 +3371,57 @@ class PlaywrightService {
         console.warn(`⚠️ [Playwright] "See more" linki kontrol edilemedi: ${e.message}`);
       }
       
+      // KRİTİK: Amazon AOD lazy-load kullanıyor — aşağı scroll etmeden sadece ilk birkaç satıcı DOM'da olur.
+      // Tüm satıcıları görmek için offer listesi container'ını tekrar tekrar scroll edip yeni offer'ların
+      // yüklenmesini tetikleyelim (3–5+ satıcılı ürünlerde diğer satıcılar böyle görünür).
+      try {
+        const scrollableSelectors = ['#aod-offer-list', '#aod-container', '#all-offers-display', '.aod-offer-list'];
+        let lastCount = 0;
+        let stableRounds = 0;
+        const maxScrollRounds = 15;
+        const scrollWaitMs = 2500;
+        for (let round = 0; round < maxScrollRounds; round++) {
+          const count = await page.$$eval('div[id^="aod-offer-"]', els => els.length).catch(() => 0);
+          if (totalSellers > 0 && count >= totalSellers) {
+            console.log(`✅ [Playwright] Lazy-load scroll: ${count} offer yüklendi (hedef: ${totalSellers}), scroll tamamlandı`);
+            break;
+          }
+          if (count === lastCount) {
+            stableRounds++;
+            if (stableRounds >= 2) {
+              console.log(`✅ [Playwright] Lazy-load scroll: offer sayısı sabit (${count}), scroll tamamlandı`);
+              break;
+            }
+          } else {
+            stableRounds = 0;
+          }
+          lastCount = count;
+          let scrolled = false;
+          for (const sel of scrollableSelectors) {
+            try {
+              const el = await page.$(sel).catch(() => null);
+              if (el) {
+                await el.evaluate(node => node.scrollTop = node.scrollHeight).catch(() => {});
+                scrolled = true;
+                await this.safeWait(page, 400);
+                break;
+              }
+            } catch (e) { /* skip */ }
+          }
+          if (!scrolled) {
+            await page.evaluate(() => {
+              const list = document.querySelector('#aod-offer-list') || document.querySelector('#aod-container');
+              if (list) list.scrollTop = list.scrollHeight;
+              else window.scrollBy(0, 400);
+            }).catch(() => {});
+          }
+          await this.safeWait(page, scrollWaitMs);
+          if (round === 0) console.log(`🔄 [Playwright] Lazy-load scroll başladı (mevcut offer: ${count}${totalSellers ? `, hedef: ${totalSellers}` : ''})`);
+        }
+      } catch (e) {
+        console.warn(`⚠️ [Playwright] Lazy-load scroll hatası (devam ediliyor): ${e.message}`);
+      }
+      
       // Tüm seller offer'larını çek - KRİTİK: Sidebar'dan tüm bilgileri çek
       const sellers = [];
       let uniqueSellers = [];
@@ -3390,10 +3441,13 @@ class PlaywrightService {
           console.warn(`⚠️ [Playwright] Pinned offer çekilemedi: ${e.message}`);
         }
         
-        // Tüm #aod-offer elementlerini bul (pinned offer hariç) - Sidebar'dan çek
-        // Her offer için: #aod-offer-0, #aod-offer-1, vb.
-        const offerElements = await page.$$('#aod-offer, div[id^="aod-offer-"]');
-        console.log(`🔍 [Playwright] ${offerElements.length} seller offer bulundu (sidebar'dan çekilecek)`);
+        // Tüm "other" offer'ları bul — div[id^="aod-offer-"] (aod-offer-0, aod-offer-1, ...); yoksa #aod-offer fallback
+        let offerElements = await page.$$('div[id^="aod-offer-"]');
+        if (offerElements.length === 0) {
+          const legacyOffer = await page.$('#aod-offer').catch(() => null);
+          if (legacyOffer) offerElements = [legacyOffer];
+        }
+        console.log(`🔍 [Playwright] ${offerElements.length} seller offer bulundu (sidebar'dan çekilecek)${totalSellers ? ` (sayfa bildirimi: ${totalSellers})` : ''}`);
         
         for (let i = 0; i < offerElements.length; i++) {
           const offer = offerElements[i];
@@ -3710,6 +3764,28 @@ class PlaywrightService {
           // devam
         }
 
+        // KRİTİK: AOD lazy-load — listeyi scroll edip tüm satıcıları yükle (3–5+ satıcılı ürünler için)
+        try {
+          let lastCount = 0;
+          let stableRounds = 0;
+          for (let round = 0; round < 15; round++) {
+            const count = await page.$$eval('div[id^="aod-offer-"]', els => els.length).catch(() => 0);
+            if (count === lastCount) {
+              stableRounds++;
+              if (stableRounds >= 2) break;
+            } else stableRounds = 0;
+            lastCount = count;
+            await page.evaluate(() => {
+              const list = document.querySelector('#aod-offer-list') || document.querySelector('#aod-container');
+              if (list) list.scrollTop = list.scrollHeight;
+              else window.scrollBy(0, 400);
+            }).catch(() => {});
+            await this.safeWait(page, 2500);
+          }
+        } catch (e) {
+          // devam
+        }
+
         const sellers = [];
 
         try {
@@ -3723,7 +3799,11 @@ class PlaywrightService {
         }
 
         try {
-          const offerElements = await page.$$('#aod-offer, div[id^="aod-offer-"]');
+          let offerElements = await page.$$('div[id^="aod-offer-"]');
+          if (offerElements.length === 0) {
+            const legacyOffer = await page.$('#aod-offer').catch(() => null);
+            if (legacyOffer) offerElements = [legacyOffer];
+          }
           for (let i = 0; i < offerElements.length; i++) {
             const offer = offerElements[i];
             try {
