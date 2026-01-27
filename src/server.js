@@ -4,63 +4,81 @@ const dotenv = require('dotenv');
 
 dotenv.config();
 
-// Browser yükleme durumu
+// Browser yükleme (vixify-playwright-service-batch ile aynı mantık — bir kere açık, pool kullanılır)
 let browserInstallationInProgress = false;
 let browserInstallationComplete = false;
+let browserInstallationPromise = null;
 
-// Railway'de Playwright browser'larını asenkron olarak kontrol et ve yükle (server başlamayı engellemez)
-if (process.env.RAILWAY_ENVIRONMENT) {
-  // Asenkron olarak browser kontrolü yap (server başlamayı engellemez)
-  setImmediate(async () => {
+function findChromiumExecutable() {
+  const fs = require('fs');
+  const path = require('path');
+  const roots = [
+    process.env.PLAYWRIGHT_BROWSERS_PATH,
+    path.join(process.env.HOME || process.env.USERPROFILE || '/root', '.cache', 'ms-playwright'),
+    path.join(process.cwd(), 'node_modules', '.cache', 'ms-playwright')
+  ].filter(Boolean);
+  const candidates = [
+    ['chrome-linux', 'chrome'],
+    ['chrome-headless-shell-linux64', 'chrome-headless-shell'],
+    ['chromium-1200', 'chrome-headless-shell-linux64', 'chrome-headless-shell']
+  ];
+  for (const root of roots) {
     try {
-      console.log('🔧 [Railway] Playwright browser\'ları kontrol ediliyor (arka planda)...');
+      if (!fs.existsSync(root)) continue;
+      const dirs = fs.readdirSync(root);
+      const chromiumDir = dirs.find(d => d.startsWith('chromium') || d.startsWith('chrome'));
+      if (!chromiumDir) continue;
+      const base = path.join(root, chromiumDir);
+      for (const parts of candidates) {
+        const exe = path.join(base, ...parts);
+        if (fs.existsSync(exe)) return exe;
+      }
+    } catch (e) { /* skip */ }
+  }
+  return null;
+}
+
+const runBrowserCheck = () => {
+  browserInstallationPromise = (async () => {
+    try {
+      console.log('🔧 [Seller Playwright] Tarayıcı kontrolü başlatılıyor...');
       const fs = require('fs');
       const path = require('path');
-      
-      // Browser executable'ı kontrol et
-      const browserPaths = [
-        path.join(process.env.HOME || '/root', '.cache/ms-playwright/chromium_headless_shell-1200/chrome-headless-shell-linux64/chrome-headless-shell'),
-        path.join(process.cwd(), 'node_modules/.cache/playwright/chromium_headless_shell-1200/chrome-headless-shell-linux64/chrome-headless-shell')
-      ];
-      
-      let browserFound = false;
-      for (const browserPath of browserPaths) {
-        try {
-          if (fs.existsSync(browserPath)) {
-            console.log(`✅ [Railway] Browser bulundu: ${browserPath}`);
-            browserFound = true;
-            browserInstallationComplete = true;
-            break;
-          }
-        } catch (e) {
-          // Devam et
-        }
+      const execSync = require('child_process').execSync;
+      const exe = findChromiumExecutable();
+      if (exe) {
+        console.log(`✅ [Seller Playwright] Chromium bulundu`);
+        browserInstallationComplete = true;
+        return;
       }
-      
-      if (!browserFound) {
-        console.log('⚠️ [Railway] Browser bulunamadı, arka planda yükleniyor...');
-        browserInstallationInProgress = true;
+      console.log('⚠️ [Seller Playwright] Chromium bulunamadı, yükleniyor...');
+      browserInstallationInProgress = true;
+      try {
+        execSync('npx playwright install chromium --with-deps', { stdio: 'inherit', timeout: 300000 });
+        browserInstallationComplete = true;
+      } catch (e) {
         try {
-          const { execSync } = require('child_process');
-          execSync('npx playwright install chromium --with-deps', { 
-            stdio: 'inherit',
-            timeout: 300000 // 5 dakika timeout
-          });
-          console.log('✅ [Railway] Playwright browser\'ları yüklendi');
+          execSync('npx playwright install chromium', { stdio: 'inherit', timeout: 180000 });
           browserInstallationComplete = true;
-        } catch (e) {
-          console.error('❌ [Railway] Playwright browser yükleme hatası:', e.message);
-          // Hata olsa bile devam et, belki build'de yüklenmiştir
-        } finally {
-          browserInstallationInProgress = false;
-        }
+        } catch (e2) { /* ignore */ }
+      } finally {
+        browserInstallationInProgress = false;
       }
     } catch (e) {
-      console.warn('⚠️ [Railway] Browser kontrolü hatası:', e.message);
+      console.error('❌ [Seller Playwright] Tarayıcı kontrolü hatası:', e.message);
       browserInstallationInProgress = false;
     }
-  });
-}
+  })();
+};
+
+runBrowserCheck();
+global.__browserInstallationPromise = browserInstallationPromise || Promise.resolve();
+global.__browserInstallationComplete = browserInstallationComplete;
+global.__browserInstallationInProgress = browserInstallationInProgress;
+browserInstallationPromise && browserInstallationPromise.then(() => {
+  global.__browserInstallationComplete = true;
+  global.__browserInstallationInProgress = false;
+}).catch(() => { global.__browserInstallationInProgress = false; });
 
 const app = express();
 const PORT = process.env.PORT || 3002;
@@ -111,6 +129,16 @@ app.use((err, req, res, next) => {
 
 // Start server
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 [Playwright Service] Server running on port ${PORT}`);
-  console.log(`📡 [Playwright Service] Health check: http://0.0.0.0:${PORT}/health`);
+  console.log(`🚀 [Seller Playwright] Server running on port ${PORT}`);
+  console.log(`📡 [Seller Playwright] Health check: http://0.0.0.0:${PORT}/health`);
+  console.log(`📡 [Seller Playwright] Batch: 10 sekme, browser bir kere açık (vixify-playwright-service-batch mantığı)`);
+  setImmediate(() => {
+    try {
+      const playwrightService = require('./services/playwrightService');
+      if (playwrightService && typeof playwrightService.getBrowser === 'function') {
+        console.log(`🔥 [Seller Playwright] Tarayıcı warmup başlatıldı...`);
+        playwrightService.getBrowser().then(() => console.log(`✅ [Seller Playwright] Tarayıcı warmup tamamlandı`)).catch(e => console.warn('⚠️ [Seller Playwright] Warmup hatası:', e.message));
+      }
+    } catch (e) { /* ignore */ }
+  });
 });

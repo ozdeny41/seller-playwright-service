@@ -3,7 +3,120 @@ const { chromium } = require('playwright');
 
 class PlaywrightService {
   constructor() {
-    console.log('✅ [Playwright Service] Initializing...');
+    console.log('✅ [Seller Playwright] Initializing (10 sekme, browser bir kere — vixify-playwright-service-batch mantığı)...');
+    this.browser = null;
+    this.browserLaunchPromise = null;
+    this.contexts = new Map();
+    this.contextSetupStatus = new Map();
+    this.pagePools = new Map();
+    this.pagePoolIndex = new Map();
+    this.pagePoolSize = 10;
+  }
+
+  getContextKey(sourceMarketplace, targetCountryCode) {
+    return `${sourceMarketplace}_${targetCountryCode || 'default'}`;
+  }
+
+  async getBrowser() {
+    const globalInstall = global.__browserInstallationPromise;
+    if (globalInstall) {
+      try { await globalInstall; } catch (e) { console.warn('⚠️ [Seller Playwright] Tarayıcı kurulum beklemesi hatası:', e.message); }
+    }
+    if (this.browser) {
+      try {
+        if (this.browser.isConnected()) return this.browser;
+        this.browser = null;
+      } catch (e) { this.browser = null; }
+    }
+    if (this.browserLaunchPromise) return await this.browserLaunchPromise;
+    this.browserLaunchPromise = this._launchBrowser();
+    try {
+      this.browser = await this.browserLaunchPromise;
+      return this.browser;
+    } finally {
+      this.browserLaunchPromise = null;
+    }
+  }
+
+  async _launchBrowser() {
+    console.log('🌐 [Seller Playwright] Browser başlatılıyor (bir kere, reuse edilecek)...');
+    const opts = {
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--disable-blink-features=AutomationControlled', '--single-process', '--disable-background-timer-throttling', '--disable-backgrounding-occluded-windows', '--disable-renderer-backgrounding'],
+      timeout: 60000
+    };
+    const browser = await chromium.launch(opts);
+    console.log('✅ [Seller Playwright] Browser başlatıldı (reuse için açık kalacak)');
+    return browser;
+  }
+
+  async getOrCreateContext(sourceMarketplace, targetCountryCode) {
+    const key = this.getContextKey(sourceMarketplace, targetCountryCode);
+    if (this.contexts.has(key)) {
+      const ctx = this.contexts.get(key);
+      try {
+        if (ctx && ctx.browser() && ctx.browser().isConnected()) {
+          ctx.pages();
+          if (this.contextSetupStatus.get(key)) {
+            console.log(`♻️ [Seller Playwright] Context reuse: ${key}`);
+            return ctx;
+          }
+        }
+      } catch (e) { /* invalid */ }
+      this.contexts.delete(key);
+      this.contextSetupStatus.delete(key);
+      this.pagePools.delete(key);
+      this.pagePoolIndex.delete(key);
+    }
+    const browser = await this.getBrowser();
+    const context = await browser.newContext({
+      viewport: { width: 1920, height: 1080 },
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      locale: 'en-US',
+      timezoneId: 'America/New_York'
+    });
+    const marketplaceDomain = { 'amazon.com': 'www.amazon.com', 'amazon.co.uk': 'www.amazon.co.uk', 'amazon.de': 'www.amazon.de', 'amazon.es': 'www.amazon.es', 'amazon.it': 'www.amazon.it', 'amazon.fr': 'www.amazon.fr', 'amazon.co.jp': 'www.amazon.co.jp' };
+    const baseUrl = `https://${marketplaceDomain[sourceMarketplace] || 'www.amazon.com'}`;
+    const setupPage = await context.newPage();
+    await setupPage.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+    await this.safeWait(setupPage, 2000);
+    if (targetCountryCode) {
+      const res = await this.selectCountryAndCurrency(setupPage, targetCountryCode, sourceMarketplace, baseUrl);
+      if (!res.success) console.warn('⚠️ [Seller Playwright] Context ülke seçimi başarısız:', res.error);
+    }
+    await setupPage.close().catch(() => {});
+    this.contexts.set(key, context);
+    this.contextSetupStatus.set(key, true);
+    console.log(`✅ [Seller Playwright] Yeni context: ${key}`);
+    return context;
+  }
+
+  async getPagePool(sourceMarketplace, targetCountryCode) {
+    const key = this.getContextKey(sourceMarketplace, targetCountryCode);
+    if (this.pagePools.has(key)) {
+      const pages = (this.pagePools.get(key) || []).filter(p => p && !p.isClosed());
+      if (pages.length === this.pagePoolSize) {
+        console.log(`♻️ [Seller Playwright] Page pool reuse: ${key} (${pages.length} sekme)`);
+        return pages;
+      }
+      (this.pagePools.get(key) || []).forEach(p => p.close().catch(() => {}));
+    }
+    const ctx = await this.getOrCreateContext(sourceMarketplace, targetCountryCode);
+    const pages = [];
+    for (let i = 0; i < this.pagePoolSize; i++) {
+      pages.push(await ctx.newPage());
+    }
+    this.pagePools.set(key, pages);
+    this.pagePoolIndex.set(key, 0);
+    console.log(`✅ [Seller Playwright] ${this.pagePoolSize} sekme açıldı: ${key}`);
+    return pages;
+  }
+
+  getNextPage(pages, key) {
+    let idx = this.pagePoolIndex.get(key) || 0;
+    const page = pages[idx];
+    this.pagePoolIndex.set(key, (idx + 1) % this.pagePoolSize);
+    return page;
   }
 
   /**
@@ -2622,90 +2735,19 @@ class PlaywrightService {
    * @param {string} targetCountry - Target country code (optional)
    * @returns {Promise<{success: boolean, data: Object, error: string | null, status: number}>}
    */
-  async getSellerInfo(asin, sourceMarketplace = 'amazon.com', targetCountry = null) {
-    let browser = null;
+  async getSellerInfo(asin, sourceMarketplace = 'amazon.com', targetCountry = null, opts = {}) {
     let page = null;
-    
+    const usePool = !opts.sharedPage;
     try {
-      console.log(`🎭 [Playwright] Seller bilgileri çekiliyor: ${asin} from ${sourceMarketplace}`);
-      
-      // Browser başlatmadan önce, eğer Railway'de browser yükleniyorsa bekle
-      if (process.env.RAILWAY_ENVIRONMENT) {
-        const fs = require('fs');
-        const path = require('path');
-        const browserPaths = [
-          path.join(process.env.HOME || '/root', '.cache/ms-playwright/chromium_headless_shell-1200/chrome-headless-shell-linux64/chrome-headless-shell'),
-          path.join(process.cwd(), 'node_modules/.cache/playwright/chromium_headless_shell-1200/chrome-headless-shell-linux64/chrome-headless-shell')
-        ];
-        
-        let browserFound = false;
-        let foundBrowserPath = null;
-        for (const browserPath of browserPaths) {
-          try {
-            if (fs.existsSync(browserPath)) {
-              browserFound = true;
-              foundBrowserPath = browserPath;
-              console.log(`✅ [Playwright] Browser bulundu: ${browserPath}`);
-              break;
-            }
-          } catch (e) {
-            // Devam et
-          }
-        }
-        
-        // Browser yoksa ve yükleniyorsa, kısa bir süre bekle
-        if (!browserFound) {
-          console.log('⏳ [Playwright] Browser bulunamadı, yükleniyor...');
-          const { execSync } = require('child_process');
-          try {
-            execSync('npx playwright install chromium --with-deps', { 
-              stdio: 'pipe',
-              timeout: 120000 // 2 dakika timeout
-            });
-            console.log('✅ [Playwright] Browser yüklendi');
-          } catch (e) {
-            console.warn('⚠️ [Playwright] Browser yükleme hatası (devam ediliyor):', e.message);
-            // Browser yükleme başarısız olsa bile devam et, belki build'de yüklenmiştir
-          }
-        }
+      console.log(`🎭 [Seller Playwright] Seller: ${asin} from ${sourceMarketplace} (${usePool ? 'pool' : 'shared'})`);
+      if (opts.sharedPage) {
+        page = opts.sharedPage;
+      } else {
+        const key = this.getContextKey(sourceMarketplace, targetCountry);
+        const pool = await this.getPagePool(sourceMarketplace, targetCountry);
+        page = this.getNextPage(pool, key);
       }
-      
-      // Browser başlat
-      console.log('🌐 [Playwright] Browser başlatılıyor...');
-      try {
-        browser = await chromium.launch({
-          headless: true,
-          args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-            '--disable-accelerated-2d-canvas',
-            '--disable-gpu',
-            '--disable-blink-features=AutomationControlled',
-            '--single-process', // Railway için önemli
-            '--disable-background-timer-throttling',
-            '--disable-backgrounding-occluded-windows',
-            '--disable-renderer-backgrounding'
-          ],
-          timeout: 30000
-        });
-        console.log('✅ [Playwright] Browser başlatıldı');
-      } catch (launchError) {
-        console.error('❌ [Playwright] Browser başlatma hatası:', launchError.message);
-        console.error('❌ [Playwright] Error stack:', launchError.stack);
-        throw new Error(`Browser başlatılamadı: ${launchError.message}`);
-      }
-
-      const context = await browser.newContext({
-        viewport: { width: 1920, height: 1080 },
-        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        locale: 'en-US',
-        timezoneId: 'America/New_York'
-      });
-
-      page = await context.newPage();
-
-      // Marketplace domain mapping
+      // Marketplace domain mapping (pool/shared sayfa kullanılıyor — browser/context pool’da)
       const marketplaceDomain = {
         'amazon.com': 'www.amazon.com',
         'amazon.co.uk': 'www.amazon.co.uk',
@@ -2728,20 +2770,15 @@ class PlaywrightService {
         waitUntil: 'domcontentloaded',
         timeout: 60000 
       });
-      await this.safeWait(page, 5000);
-
-      // KRİTİK: Önce ülke ve para birimi seçimi yap
-      if (targetCountry) {
+      await this.safeWait(page, 3000);
+      // Ülke/para birimi getOrCreateContext'te yapıldı — pool/shared kullanırken bu blok atlanır
+      if (targetCountry && !usePool && !opts.sharedPage) {
         console.log(`🌍 [Playwright] Ülke ve para birimi seçimi yapılıyor: ${targetCountry}`);
         const countrySelectionResult = await this.selectCountryAndCurrency(page, targetCountry, sourceMarketplace, productUrl);
-        
         if (!countrySelectionResult.success) {
           console.warn(`⚠️ [Playwright] Ülke ve para birimi seçimi başarısız: ${countrySelectionResult.error}`);
-          // Devam et, seller bilgilerini çekmeyi dene
         } else {
           console.log(`✅ [Playwright] Ülke ve para birimi seçimi tamamlandı`);
-          
-          // ASIN sayfasına geri dön (eğer preferences sayfasındaysak veya sayfa yüklenmemişse)
           const currentUrl = page.url();
           const isOnAsinPage = currentUrl.includes('/dp/');
           const needsNavigation = !isOnAsinPage;
@@ -3587,27 +3624,12 @@ class PlaywrightService {
         status: 500
       };
     } finally {
-      // Cleanup
-      try {
-        if (page && !page.isClosed()) {
-          await page.close();
-        }
-      } catch (e) {
-        console.warn(`⚠️ [Playwright] Page close error: ${e.message}`);
-      }
-      
-      try {
-        if (browser) {
-          await browser.close();
-        }
-      } catch (e) {
-        console.warn(`⚠️ [Playwright] Browser close error: ${e.message}`);
-      }
+      // Pool/shared kullanıldığında sayfa ve browser kapatılmaz — tekrar kullanılır
     }
   }
 
   /**
-   * Get seller information for multiple ASINs in a single browser session.
+   * Get seller information for multiple ASINs in a single browser session (10 sekme paralel — vixify-playwright-service-batch mantığı).
    * Ülke + para birimi seçimi 1 kez yapılır, sonra ASIN değiştirerek AOD sayfaları gezilir.
    * @param {string[]} asins
    * @param {string} sourceMarketplace
@@ -3615,9 +3637,6 @@ class PlaywrightService {
    * @returns {Promise<{success: boolean, data: Object|null, error: string|null, status: number}>}
    */
   async getSellerInfoBatch(asins, sourceMarketplace = 'amazon.com', targetCountry = null) {
-    let browser = null;
-    let page = null;
-
     try {
       const asinList = Array.isArray(asins)
         ? asins.map(a => String(a || '').trim()).filter(Boolean)
@@ -3627,247 +3646,60 @@ class PlaywrightService {
         return { success: false, data: null, error: 'ASIN list is required', status: 400 };
       }
 
-      console.log(`🎭 [Playwright] Batch seller bilgileri çekiliyor: ${asinList.length} ASIN from ${sourceMarketplace}`);
+      console.log(`🎭 [Seller Playwright] Batch: ${asinList.length} ASIN, 10 sekme paralel (browser bir kere)`);
 
-      // Browser başlat
-      console.log('🌐 [Playwright] Browser başlatılıyor (batch)...');
-      browser = await chromium.launch({
-        headless: true,
-        args: [
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-dev-shm-usage',
-          '--disable-accelerated-2d-canvas',
-          '--disable-gpu',
-          '--disable-blink-features=AutomationControlled',
-          '--single-process',
-          '--disable-background-timer-throttling',
-          '--disable-backgrounding-occluded-windows',
-          '--disable-renderer-backgrounding'
-        ],
-        timeout: 30000
-      });
-
-      const context = await browser.newContext({
-        viewport: { width: 1920, height: 1080 },
-        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        locale: 'en-US',
-        timezoneId: 'America/New_York'
-      });
-
-      page = await context.newPage();
-
-      const marketplaceDomain = {
-        'amazon.com': 'www.amazon.com',
-        'amazon.co.uk': 'www.amazon.co.uk',
-        'amazon.de': 'www.amazon.de',
-        'amazon.es': 'www.amazon.es',
-        'amazon.it': 'www.amazon.it',
-        'amazon.fr': 'www.amazon.fr',
-        'amazon.co.jp': 'www.amazon.co.jp'
-      };
-
-      const baseDomain = marketplaceDomain[sourceMarketplace] || 'www.amazon.com';
-      const baseUrl = `https://${baseDomain}`;
-
-      // İlk ASIN ile ülke + para birimi seçimi (tek sefer)
-      if (targetCountry) {
-        const firstAsin = asinList[0];
-        const firstProductUrl = `${baseUrl}/dp/${firstAsin}`;
-        console.log(`🌐 [Playwright] (batch) İlk ASIN sayfası açılıyor: ${firstProductUrl}`);
-        await page.goto(firstProductUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
-        await this.safeWait(page, 5000);
-
-        console.log(`🌍 [Playwright] (batch) Ülke ve para birimi seçimi yapılıyor: ${targetCountry}`);
-        const countrySelectionResult = await this.selectCountryAndCurrency(page, targetCountry, sourceMarketplace, firstProductUrl);
-        if (!countrySelectionResult.success) {
-          console.warn(`⚠️ [Playwright] (batch) Ülke/para birimi seçimi başarısız: ${countrySelectionResult.error}`);
-        } else {
-          console.log(`✅ [Playwright] (batch) Ülke/para birimi seçimi tamamlandı`);
-        }
-      }
+      // 1) Browser bir kere, 2) Context + ülke bir kere, 3) 10 sekme pool
+      await this.getBrowser();
+      await this.getOrCreateContext(sourceMarketplace, targetCountry);
+      const pages = await this.getPagePool(sourceMarketplace, targetCountry);
+      const key = this.getContextKey(sourceMarketplace, targetCountry);
 
       const items = [];
+      const batchSize = 10;
 
-      for (let idx = 0; idx < asinList.length; idx++) {
-        const asin = asinList[idx];
-        console.log(`🧾 [Playwright] (batch) ${idx + 1}/${asinList.length} işleniyor: ${asin}`);
-
-        const productUrl = `${baseUrl}/dp/${asin}`;
-        await page.goto(productUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
-        await this.safeWait(page, 3000);
-
-        // Buybox (isteğe bağlı ama mevcut response yapısı için tutuluyor)
-        let buyboxData = null;
-        try {
-          buyboxData = await this.extractBuyboxData(page);
-        } catch (e) {
-          buyboxData = null;
+      for (let i = 0; i < asinList.length; i += batchSize) {
+        const batch = asinList.slice(i, i + batchSize);
+        const assignedPages = [];
+        for (let j = 0; j < batch.length; j++) {
+          assignedPages.push(this.getNextPage(pages, key));
         }
-
-        // AOD sabit link formatı
-        const aodUrl = `${baseUrl}/dp/${asin}/ref=olp-opf-redir?aod=1&ie=UTF8&condition=NEW&th=1`;
-        console.log(`🔗 [Playwright] (batch) AOD sayfasına gidiliyor: ${aodUrl}`);
-        await page.goto(aodUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
-        await this.safeWait(page, 2500);
-
-        // Captcha kontrolü
-        try {
-          const urlNow = page.url();
-          const bodyText = await page.textContent('body').catch(() => '');
-          const isCaptchaPage = urlNow.includes('/errors/validateCaptcha') || bodyText.includes('Click the button below to continue shopping');
-          if (isCaptchaPage) {
-            console.warn(`⚠️ [Playwright] (batch) Captcha sayfası tespit edildi, Continue shopping tıklanıyor...`);
-            const btnSelectors = [
-              'button[alt="Continue shopping"]',
-              'form[action="/errors/validateCaptcha"] button[type="submit"]',
-              'form[action="/errors/validateCaptcha"] button',
-              'button:has-text("Continue shopping")',
-              'button[type="submit"]'
-            ];
-            for (const sel of btnSelectors) {
-              try {
-                const btn = await page.$(sel).catch(() => null);
-                if (btn) {
-                  await btn.click({ timeout: 30000 }).catch(() => btn.click({ force: true, timeout: 30000 }));
-                  await this.safeWait(page, 3000);
-                  break;
-                }
-              } catch (e) {
-                continue;
-              }
-            }
+        console.log(`📦 [Seller Playwright] Batch ${Math.floor(i / batchSize) + 1}: ${batch.length} ASIN paralel işleniyor (${i + 1}-${i + batch.length}/${asinList.length})`);
+        const results = await Promise.all(
+          batch.map((asin, j) =>
+            this.getSellerInfo(asin, sourceMarketplace, targetCountry, { sharedPage: assignedPages[j] })
+          )
+        );
+        for (let j = 0; j < results.length; j++) {
+          const r = results[j];
+          const asin = batch[j];
+          if (r.success && r.data) {
+            items.push({
+              asin: r.data.asin || asin,
+              sourceMarketplace: r.data.sourceMarketplace || sourceMarketplace,
+              targetCountry: r.data.targetCountry != null ? r.data.targetCountry : targetCountry,
+              totalSellers: r.data.totalSellers != null ? r.data.totalSellers : (r.data.sellers ? r.data.sellers.length : 0),
+              sellers: r.data.sellers || [],
+              buybox: r.data.buybox || null
+            });
+          } else {
+            items.push({ asin, sourceMarketplace, targetCountry, totalSellers: 0, sellers: [], buybox: null });
           }
-        } catch (e) {
-          // devam
         }
-
-        // AOD container bekle
-        await page
-          .waitForSelector('#all-offers-display, #aod-container, #aod-offer-list, #aod-offer, #aod-pinned-offer', {
-            timeout: 20000,
-            state: 'visible'
-          })
-          .catch(() => {});
-        await this.safeWait(page, 1000);
-
-        // Pinned offer "See more"
-        try {
-          const seeMoreLink = await page.$('#aod-pinned-offer-show-more-link').catch(() => null);
-          if (seeMoreLink) {
-            await seeMoreLink.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {});
-            await this.safeWait(page, 300);
-            await seeMoreLink.click({ timeout: 10000 }).catch(() => {});
-            await this.safeWait(page, 1500);
-          }
-        } catch (e) {
-          // devam
+        if (i + batchSize < asinList.length) {
+          await new Promise(r => setTimeout(r, 800));
         }
-
-        // KRİTİK: AOD lazy-load — listeyi scroll edip tüm satıcıları yükle (3–5+ satıcılı ürünler için)
-        try {
-          let lastCount = 0;
-          let stableRounds = 0;
-          for (let round = 0; round < 15; round++) {
-            const count = await page.$$eval('div[id^="aod-offer-"]', els => els.length).catch(() => 0);
-            if (count === lastCount) {
-              stableRounds++;
-              if (stableRounds >= 2) break;
-            } else stableRounds = 0;
-            lastCount = count;
-            await page.evaluate(() => {
-              const list = document.querySelector('#aod-offer-list') || document.querySelector('#aod-container');
-              if (list) list.scrollTop = list.scrollHeight;
-              else window.scrollBy(0, 400);
-            }).catch(() => {});
-            await this.safeWait(page, 2500);
-          }
-        } catch (e) {
-          // devam
-        }
-
-        const sellers = [];
-
-        try {
-          const pinnedOffer = await page.$('#aod-pinned-offer').catch(() => null);
-          if (pinnedOffer) {
-            const pinnedSellerData = await this.extractSellerDataFromOffer(page, pinnedOffer, 0, true);
-            if (pinnedSellerData) sellers.push(pinnedSellerData);
-          }
-        } catch (e) {
-          // devam
-        }
-
-        try {
-          let offerElements = await page.$$('div[id^="aod-offer-"]');
-          if (offerElements.length === 0) {
-            const legacyOffer = await page.$('#aod-offer').catch(() => null);
-            if (legacyOffer) offerElements = [legacyOffer];
-          }
-          for (let i = 0; i < offerElements.length; i++) {
-            const offer = offerElements[i];
-            try {
-              await offer.click().catch(() => {});
-              await this.safeWait(page, 400);
-              const sellerData = await this.extractSellerDataFromOffer(page, offer, i + 1, false);
-              if (sellerData) sellers.push(sellerData);
-            } catch (e) {
-              continue;
-            }
-          }
-        } catch (e) {
-          // devam
-        }
-
-        // Buybox'ı başa ekle (varsa ve listede yoksa)
-        if (buyboxData) {
-          const buyboxExists = sellers.some(s => {
-            const sName = (s.sellerName || s.soldBy || '').toLowerCase().trim();
-            const bName = (buyboxData.sellerName || buyboxData.soldBy || '').toLowerCase().trim();
-            return sName && bName && sName === bName && s.isBuybox === true;
-          });
-          if (!buyboxExists) sellers.unshift(buyboxData);
-        }
-
-        items.push({
-          asin,
-          sourceMarketplace,
-          targetCountry,
-          totalSellers: sellers.length,
-          sellers,
-          buybox: buyboxData || null
-        });
       }
 
+      console.log(`✅ [Seller Playwright] Batch tamamlandı: ${items.length} ürün, browser/sekmeler açık kalıyor`);
       return {
         success: true,
-        data: {
-          sourceMarketplace,
-          targetCountry,
-          totalItems: items.length,
-          items
-        },
+        data: { sourceMarketplace, targetCountry, totalItems: items.length, items },
         error: null,
         status: 200
       };
     } catch (error) {
-      console.error(`❌ [Playwright] Batch seller bilgileri çekilirken hata:`, error.message);
+      console.error(`❌ [Seller Playwright] Batch hata:`, error.message);
       return { success: false, data: null, error: error.message, status: 500 };
-    } finally {
-      try {
-        if (page && !page.isClosed()) {
-          await page.close();
-        }
-      } catch (e) {
-        // ignore
-      }
-      try {
-        if (browser) {
-          await browser.close();
-        }
-      } catch (e) {
-        // ignore
-      }
     }
   }
 }
