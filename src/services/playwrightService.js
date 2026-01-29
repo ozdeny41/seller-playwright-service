@@ -2969,16 +2969,25 @@ class PlaywrightService {
         const sellerMap = new Map(); // sellerName veya soldBy -> seller data
         
         for (const seller of sellers) {
-          // Seller key'i oluştur: sellerName varsa onu kullan, yoksa soldBy, yoksa index
+          // Seller key'i oluştur: sellerName varsa onu kullan, yoksa soldBy, yoksa sellerId, yoksa meta alanlar
           // KRİTİK: sellerName ve soldBy'yi normalize et (boşlukları temizle, lowercase yap)
           const sellerNameNormalized = seller.sellerName ? seller.sellerName.toLowerCase().trim().replace(/\s+/g, ' ') : null;
           const soldByNormalized = seller.soldBy ? seller.soldBy.toLowerCase().trim().replace(/\s+/g, ' ') : null;
-          const sellerKey = (sellerNameNormalized || soldByNormalized || `seller-${seller.index}`).toLowerCase().trim();
+          const sellerIdNormalized = seller.sellerId ? String(seller.sellerId).toLowerCase().trim() : null;
+          const shipsFromNormalized = seller.shipsFrom ? String(seller.shipsFrom).toLowerCase().trim().replace(/\s+/g, ' ') : null;
+          const conditionNormalized = seller.condition ? String(seller.condition).toLowerCase().trim() : null;
+          const priceKey = seller.price != null ? `p:${seller.price}` : null;
+          const metaKey = [shipsFromNormalized, conditionNormalized, priceKey].filter(Boolean).join('|');
           
-          // KRİTİK: "N/A", "na", boş veya geçersiz seller name'leri filtrele (unique seller olarak sayma)
-          // Bu seller'lar genellikle Amazon tarafından gizlenmiş veya geçersiz seller'lar
-          if (!sellerKey || sellerKey === 'n/a' || sellerKey === 'na' || sellerKey.startsWith('seller-') || sellerKey.length < 2) {
-            // Seller name bulunamadı veya geçersiz, bu seller'ı atla (unique seller olarak sayma)
+          let sellerKey = null;
+          if (sellerNameNormalized) sellerKey = sellerNameNormalized;
+          else if (soldByNormalized) sellerKey = soldByNormalized;
+          else if (sellerIdNormalized) sellerKey = `id:${sellerIdNormalized}`;
+          else if (metaKey) sellerKey = `meta:${metaKey}`;
+          else sellerKey = `seller-${seller.index ?? 'na'}`;
+          
+          // KRİTİK: "N/A", "na", boş seller key'leri filtrele
+          if (!sellerKey || sellerKey === 'n/a' || sellerKey === 'na') {
             console.log(`⚠️ [Playwright] Geçersiz seller atlandı (unique seller olarak sayılmadı): ${seller.sellerName || seller.soldBy || 'N/A'}`);
             continue; // Bu seller'ı unique seller listesine ekleme
           }
@@ -2996,7 +3005,12 @@ class PlaywrightService {
               const index = uniqueSellers.findIndex(s => {
                 const sName = s.sellerName ? s.sellerName.toLowerCase().trim().replace(/\s+/g, ' ') : null;
                 const sSoldBy = s.soldBy ? s.soldBy.toLowerCase().trim().replace(/\s+/g, ' ') : null;
-                const sKey = (sName || sSoldBy || `seller-${s.index}`).toLowerCase().trim();
+                const sId = s.sellerId ? String(s.sellerId).toLowerCase().trim() : null;
+                const sShips = s.shipsFrom ? String(s.shipsFrom).toLowerCase().trim().replace(/\s+/g, ' ') : null;
+                const sCond = s.condition ? String(s.condition).toLowerCase().trim() : null;
+                const sPrice = s.price != null ? `p:${s.price}` : null;
+                const sMeta = [sShips, sCond, sPrice].filter(Boolean).join('|');
+                const sKey = sName || sSoldBy || (sId ? `id:${sId}` : null) || (sMeta ? `meta:${sMeta}` : null) || `seller-${s.index ?? 'na'}`;
                 return sKey === sellerKey;
               });
               if (index !== -1) {
