@@ -135,16 +135,19 @@ router.post('/', async (req, res, next) => {
         
         if (isEAGAIN) {
           console.error(`❌ [Queue] ${asinList[0]} için seller bilgileri EAGAIN hatası - Railway kaynak limiti aşıldı`);
-          throw {
-            ...error,
-            isEAGAIN: true,
-            message: `Railway kaynak limiti aşıldı (EAGAIN). Lütfen birkaç saniye bekleyip tekrar deneyin.`
-          };
+          const err = new Error(`Railway kaynak limiti aşıldı (EAGAIN). Lütfen birkaç saniye bekleyip tekrar deneyin.`);
+          err.isEAGAIN = true;
+          err.status = 503;
+          throw err;
         }
         throw error;
       }
     });
     
+    if (!result || typeof result !== 'object') {
+      console.error(`❌ [Playwright Service] Servis yanıtı geçersiz (result: ${typeof result})`);
+      return res.status(500).json({ ok: false, error: 'No response from seller service' });
+    }
     console.log(`📤 [Playwright Service] Seller info response hazırlanıyor:`, {
       success: result.success,
       hasData: !!result.data,
@@ -201,16 +204,19 @@ router.get('/:asin', async (req, res, next) => {
         
         if (isEAGAIN) {
           console.error(`❌ [Queue] ${asin} için seller bilgileri EAGAIN hatası (GET) - Railway kaynak limiti aşıldı`);
-          throw {
-            ...error,
-            isEAGAIN: true,
-            message: `Railway kaynak limiti aşıldı (EAGAIN). Lütfen birkaç saniye bekleyip tekrar deneyin.`
-          };
+          const err = new Error(`Railway kaynak limiti aşıldı (EAGAIN). Lütfen birkaç saniye bekleyip tekrar deneyin.`);
+          err.isEAGAIN = true;
+          err.status = 503;
+          throw err;
         }
         throw error;
       }
     });
     
+    if (!result || typeof result !== 'object') {
+      console.error(`❌ [Playwright Service] Servis yanıtı geçersiz (GET, result: ${typeof result})`);
+      return res.status(500).json({ ok: false, error: 'No response from seller service' });
+    }
     if (result.success) {
       res.json({ ok: true, data: result.data });
     } else {

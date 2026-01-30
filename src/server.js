@@ -80,6 +80,16 @@ browserInstallationPromise && browserInstallationPromise.then(() => {
   global.__browserInstallationInProgress = false;
 }).catch(() => { global.__browserInstallationInProgress = false; });
 
+// Railway logları için: unhandledRejection / uncaughtException
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('❌ [Seller Playwright] unhandledRejection:', reason);
+  if (reason && reason.stack) console.error(reason.stack);
+});
+process.on('uncaughtException', (err) => {
+  console.error('❌ [Seller Playwright] uncaughtException:', err.message);
+  if (err.stack) console.error(err.stack);
+});
+
 const app = express();
 const PORT = process.env.PORT || 3002;
 
@@ -118,10 +128,11 @@ app.get('/health', (req, res) => {
 // Routes
 app.use('/api', require('./routes'));
 
-// Error handling
+// Error handling - EAGAIN için 503 (Railway kaynak limiti)
 app.use((err, req, res, next) => {
-  console.error('❌ [Playwright Service] Error:', err);
-  res.status(err.status || 500).json({
+  const status = err.status || (err.isEAGAIN ? 503 : 500);
+  console.error('❌ [Playwright Service] Error:', err.message || err, 'status:', status);
+  res.status(status).json({
     ok: false,
     error: err.message || 'Internal server error'
   });

@@ -42,6 +42,8 @@ GET /api/sellers/:asin
 3. Root Directory: `.` (root)
 4. Build ve Start komutları otomatik algılanacak
 
+**Push yaptığınız halde deploy olmuyorsa:** [RAILWAY_DEPLOY_CHECKLIST.md](./RAILWAY_DEPLOY_CHECKLIST.md) dosyasındaki adımları Railway Dashboard'da kontrol edin (repo bağlantısı, branch, otomatik deploy, build/start logları).
+
 ## Port
 
 Default port: `3002`
