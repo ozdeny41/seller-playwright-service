@@ -2765,12 +2765,12 @@ class PlaywrightService {
       const productUrl = `${baseUrl}/dp/${asin}`;
       console.log(`🌐 [Playwright] Sayfa açılıyor: ${productUrl}`);
 
-      // Sayfayı yükle
+      // Sayfayı yükle (Cloudflare/backend 20s limiti için 18s - hızlı yanıt)
       await page.goto(productUrl, { 
         waitUntil: 'domcontentloaded',
-        timeout: 60000 
+        timeout: 18000 
       });
-      await this.safeWait(page, 3000);
+      await this.safeWait(page, 1500);
       // Ülke/para birimi getOrCreateContext'te yapıldı — pool/shared kullanırken bu blok atlanır
       if (targetCountry && !usePool && !opts.sharedPage) {
         console.log(`🌍 [Playwright] Ülke ve para birimi seçimi yapılıyor: ${targetCountry}`);
@@ -2786,18 +2786,16 @@ class PlaywrightService {
           if (needsNavigation) {
             console.log(`🔗 [Playwright] ASIN sayfasına geri dönülüyor: ${productUrl}`);
             try {
-              // KRİTİK: domcontentloaded kullan - daha hızlı ve güvenilir
-              await page.goto(productUrl, { waitUntil: 'domcontentloaded', timeout: 120000 });
+              // KRİTİK: domcontentloaded + kısa timeout (Cloudflare 20s limiti)
+              await page.goto(productUrl, { waitUntil: 'domcontentloaded', timeout: 18000 });
               console.log(`✅ [Playwright] ASIN sayfası DOM yüklendi`);
               
-              // Ekstra bekleme - buybox'ın render olması için
-              await this.safeWait(page, 5000);
+              await this.safeWait(page, 1500);
               
-              // Buybox container'ının yüklenmesini bekle - daha esnek selector'lar
               console.log(`⏳ [Playwright] Buybox container'ının yüklenmesi bekleniyor...`);
               try {
                 await page.waitForSelector('#desktop_buybox, #buybox, #qualifiedBuybox, #apex_offerDisplay_single_desktop, #apex_offerDisplay_desktop', { 
-                  timeout: 45000, 
+                  timeout: 10000, 
                   state: 'attached' 
                 });
                 console.log(`✅ [Playwright] Buybox container bulundu`);
@@ -2839,7 +2837,7 @@ class PlaywrightService {
                 } else {
                   // Sayfa yüklenmemiş, tekrar dene
                   console.log(`🔄 [Playwright] Sayfa yüklenmemiş, tekrar deneniyor...`);
-                  await page.goto(productUrl, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {
+                  await page.goto(productUrl, { waitUntil: 'domcontentloaded', timeout: 18000 }).catch(() => {
                     console.warn(`⚠️ [Playwright] İkinci deneme de başarısız, mevcut sayfayla devam ediliyor...`);
                   });
                   await this.safeWait(page, 5000);
@@ -2859,7 +2857,7 @@ class PlaywrightService {
           console.log(`⏳ [Playwright] Buybox container'ının varlığı kontrol ediliyor...`);
           try {
             await page.waitForSelector('#desktop_buybox, #buybox, #qualifiedBuybox, #apex_offerDisplay_single_desktop, #apex_offerDisplay_desktop, #corePrice_feature_div', { 
-              timeout: 30000,
+              timeout: 10000,
               state: 'attached'
             });
             console.log(`✅ [Playwright] Buybox container doğrulandı`);
@@ -2880,21 +2878,19 @@ class PlaywrightService {
       if (!buyboxData || (!buyboxData.standardShippingPrice && !buyboxData.standardDeliveryDate && !buyboxData.sellerName)) {
         console.warn(`⚠️ [Playwright] Buybox bilgileri eksik veya null, sayfa yeniden yükleniyor ve tekrar deneniyor...`);
         try {
-          // Sayfayı yeniden yükle
-          await page.reload({ waitUntil: 'domcontentloaded', timeout: 120000 });
-          await this.safeWait(page, 5000);
+          await page.reload({ waitUntil: 'domcontentloaded', timeout: 15000 });
+          await this.safeWait(page, 1500);
           
-          // Buybox container'ını bekle
           try {
             await page.waitForSelector('#desktop_buybox, #buybox, #qualifiedBuybox, #apex_offerDisplay_single_desktop, #apex_offerDisplay_desktop', { 
-              timeout: 30000, 
+              timeout: 8000, 
               state: 'attached' 
             });
           } catch (e) {
             console.warn(`⚠️ [Playwright] Buybox container retry'de bulunamadı`);
           }
           
-          await this.safeWait(page, 3000);
+          await this.safeWait(page, 1000);
           
           // Tekrar dene
           buyboxData = await this.extractBuyboxData(page);
@@ -2918,7 +2914,7 @@ class PlaywrightService {
       const directAodUrl = `${baseUrl}/dp/${asin}/ref=olp-opf-redir?aod=1&ie=UTF8&condition=NEW&th=1`;
       console.log(`🔗 [Playwright] AOD sayfasına gidiliyor (sabit link): ${directAodUrl}`);
       try {
-        await page.goto(directAodUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+        await page.goto(directAodUrl, { waitUntil: 'domcontentloaded', timeout: 18000 });
         isOnAodPage = true;
       } catch (e) {
         console.warn(`⚠️ [Playwright] AOD sabit link ile açılamadı, eski yönteme düşülüyor: ${e.message}`);
@@ -3246,7 +3242,7 @@ class PlaywrightService {
               // ASIN'den AOD URL'yi oluştur (domain + /gp/offer-listing/...)
               const aodUrl = `${domain}/gp/offer-listing/${asin}/ref=dp_olp_NEW_mbc?ie=UTF8&condition=NEW`;
               console.log(`🔗 [Playwright] AOD URL oluşturuldu: ${aodUrl}`);
-              await page.goto(aodUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+              await page.goto(aodUrl, { waitUntil: 'domcontentloaded', timeout: 18000 });
               console.log(`✅ [Playwright] AOD sayfasına gidildi (hash URL fallback)`);
             } catch (jsError) {
               console.warn(`⚠️ [Playwright] Hash URL işleme başarısız, normal click deneniyor: ${jsError.message}`);
@@ -3255,7 +3251,7 @@ class PlaywrightService {
             }
           } else {
             // Normal URL ise direkt git
-            await page.goto(href, { waitUntil: 'domcontentloaded', timeout: 60000 });
+            await page.goto(href, { waitUntil: 'domcontentloaded', timeout: 18000 });
             console.log(`✅ [Playwright] "New & Used" sayfasına direkt gidildi (href kullanılarak)`);
           }
         } else {
@@ -3318,7 +3314,7 @@ class PlaywrightService {
             const baseUrl = currentUrl.split('?')[0];
             const aodUrl = `${baseUrl}?showAllOffers=1`;
             console.log(`🔗 [Playwright] Son çare: AOD URL'ye gidiliyor: ${aodUrl}`);
-            await page.goto(aodUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+            await page.goto(aodUrl, { waitUntil: 'domcontentloaded', timeout: 18000 });
             console.log(`✅ [Playwright] AOD sayfasına gidildi (son çare)`);
           }
         }
@@ -3333,7 +3329,7 @@ class PlaywrightService {
       console.log(`🛒 [Playwright] Seller listesi container'ı bekleniyor (sidebar açılması için)...`);
       try {
         // Önce sidebar container'ını bekle
-        await page.waitForSelector('#all-offers-display, #aod-container, #aod-offer-list, #aod-offer, #aod-pinned-offer', { timeout: 20000, state: 'visible' });
+        await page.waitForSelector('#all-offers-display, #aod-container, #aod-offer-list, #aod-offer, #aod-pinned-offer', { timeout: 10000, state: 'visible' });
         console.log(`✅ [Playwright] Seller listesi container bulundu`);
         
         // KRİTİK: Sidebar'ın tamamen yüklenmesi için ek bekleme
@@ -3415,8 +3411,8 @@ class PlaywrightService {
         const scrollableSelectors = ['#aod-offer-list', '#aod-container', '#all-offers-display', '.aod-offer-list'];
         let lastCount = 0;
         let stableRounds = 0;
-        const maxScrollRounds = 15;
-        const scrollWaitMs = 2500;
+        const maxScrollRounds = 6;
+        const scrollWaitMs = 1200;
         for (let round = 0; round < maxScrollRounds; round++) {
           const count = await page.$$eval('div[id^="aod-offer-"]', els => els.length).catch(() => 0);
           if (totalSellers > 0 && count >= totalSellers) {
@@ -3526,25 +3522,16 @@ class PlaywrightService {
         const sellerMap = new Map(); // sellerName veya soldBy -> seller data
         
         for (const seller of sellers) {
-          // Seller key'i oluştur: sellerName varsa onu kullan, yoksa soldBy, yoksa sellerId, yoksa meta alanlar
+          // Seller key'i oluştur: sellerName varsa onu kullan, yoksa soldBy, yoksa index
           // KRİTİK: sellerName ve soldBy'yi normalize et (boşlukları temizle, lowercase yap)
           const sellerNameNormalized = seller.sellerName ? seller.sellerName.toLowerCase().trim().replace(/\s+/g, ' ') : null;
           const soldByNormalized = seller.soldBy ? seller.soldBy.toLowerCase().trim().replace(/\s+/g, ' ') : null;
-          const sellerIdNormalized = seller.sellerId ? String(seller.sellerId).toLowerCase().trim() : null;
-          const shipsFromNormalized = seller.shipsFrom ? String(seller.shipsFrom).toLowerCase().trim().replace(/\s+/g, ' ') : null;
-          const conditionNormalized = seller.condition ? String(seller.condition).toLowerCase().trim() : null;
-          const priceKey = seller.price != null ? `p:${seller.price}` : null;
-          const metaKey = [shipsFromNormalized, conditionNormalized, priceKey].filter(Boolean).join('|');
+          const sellerKey = (sellerNameNormalized || soldByNormalized || `seller-${seller.index}`).toLowerCase().trim();
           
-          let sellerKey = null;
-          if (sellerNameNormalized) sellerKey = sellerNameNormalized;
-          else if (soldByNormalized) sellerKey = soldByNormalized;
-          else if (sellerIdNormalized) sellerKey = `id:${sellerIdNormalized}`;
-          else if (metaKey) sellerKey = `meta:${metaKey}`;
-          else sellerKey = `seller-${seller.index ?? 'na'}`;
-          
-          // KRİTİK: "N/A", "na", boş seller key'leri filtrele
-          if (!sellerKey || sellerKey === 'n/a' || sellerKey === 'na') {
+          // KRİTİK: "N/A", "na", boş veya geçersiz seller name'leri filtrele (unique seller olarak sayma)
+          // Bu seller'lar genellikle Amazon tarafından gizlenmiş veya geçersiz seller'lar
+          if (!sellerKey || sellerKey === 'n/a' || sellerKey === 'na' || sellerKey.startsWith('seller-') || sellerKey.length < 2) {
+            // Seller name bulunamadı veya geçersiz, bu seller'ı atla (unique seller olarak sayma)
             console.log(`⚠️ [Playwright] Geçersiz seller atlandı (unique seller olarak sayılmadı): ${seller.sellerName || seller.soldBy || 'N/A'}`);
             continue; // Bu seller'ı unique seller listesine ekleme
           }
@@ -3562,12 +3549,7 @@ class PlaywrightService {
               const index = uniqueSellers.findIndex(s => {
                 const sName = s.sellerName ? s.sellerName.toLowerCase().trim().replace(/\s+/g, ' ') : null;
                 const sSoldBy = s.soldBy ? s.soldBy.toLowerCase().trim().replace(/\s+/g, ' ') : null;
-                const sId = s.sellerId ? String(s.sellerId).toLowerCase().trim() : null;
-                const sShips = s.shipsFrom ? String(s.shipsFrom).toLowerCase().trim().replace(/\s+/g, ' ') : null;
-                const sCond = s.condition ? String(s.condition).toLowerCase().trim() : null;
-                const sPrice = s.price != null ? `p:${s.price}` : null;
-                const sMeta = [sShips, sCond, sPrice].filter(Boolean).join('|');
-                const sKey = sName || sSoldBy || (sId ? `id:${sId}` : null) || (sMeta ? `meta:${sMeta}` : null) || `seller-${s.index ?? 'na'}`;
+                const sKey = (sName || sSoldBy || `seller-${s.index}`).toLowerCase().trim();
                 return sKey === sellerKey;
               });
               if (index !== -1) {

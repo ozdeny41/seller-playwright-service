@@ -26,9 +26,10 @@ class RequestQueue {
     }
 
     const timeSinceLastEAGAIN = Date.now() - this.lastEAGAINTime;
-    if (this.lastEAGAINTime > 0 && timeSinceLastEAGAIN < 120000) {
-      const waitTime = 120000 - timeSinceLastEAGAIN;
-      console.log(`⏳ [Queue] Son EAGAIN hatasından ${Math.round(timeSinceLastEAGAIN/1000)}s geçti, ${Math.round(waitTime/1000)}s daha bekleniyor (Railway kaynak limitleri için)...`);
+    const eagainCooldownMs = 35000; // 35s (önceden 120s - 504 önleme için kısaltıldı)
+    if (this.lastEAGAINTime > 0 && timeSinceLastEAGAIN < eagainCooldownMs) {
+      const waitTime = eagainCooldownMs - timeSinceLastEAGAIN;
+      console.log(`⏳ [Queue] Son EAGAIN hatasından ${Math.round(timeSinceLastEAGAIN/1000)}s geçti, ${Math.round(waitTime/1000)}s daha bekleniyor...`);
       setTimeout(() => this.process(), waitTime);
       return;
     }
@@ -60,8 +61,8 @@ class RequestQueue {
         this.eagainCount++;
         console.error(`🚫 [Queue] EAGAIN hatası (${this.eagainCount}. kez) - Railway kaynak limiti aşıldı. Queue durduruluyor, daha uzun bekleniyor...`);
         
-        const baseDelay = 120000; // 120 saniye (2 dakika)
-        exponentialDelay = Math.min(baseDelay * Math.pow(2, this.eagainCount - 1), 600000); // Max 600 saniye (10 dakika)
+        const baseDelay = 35000; // 35 saniye (504 önleme - önceden 120s)
+        exponentialDelay = Math.min(baseDelay * Math.pow(2, this.eagainCount - 1), 120000); // Max 120s
         
         console.error(`🚫 [Queue] ${Math.round(exponentialDelay/1000)} saniye bekleniyor (EAGAIN count: ${this.eagainCount})...`);
         reject(error);
@@ -69,14 +70,13 @@ class RequestQueue {
         reject(error);
       }
     } finally {
-      // KRİTİK: Queue'nun takılmaması için flag'leri her durumda resetle
       this.running--;
       this.processing = false;
 
       if (isEAGAINError) {
-        setTimeout(() => this.process(), exponentialDelay || 120000);
+        setTimeout(() => this.process(), exponentialDelay || 35000);
       } else {
-        const delay = this.eagainCount > 0 ? 120000 : 60000; // EAGAIN varsa 120s, yoksa 60s
+        const delay = this.eagainCount > 0 ? 35000 : 8000; // EAGAIN varsa 35s, yoksa 8s (504 önleme)
         setTimeout(() => this.process(), delay);
       }
     }

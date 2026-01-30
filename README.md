@@ -60,3 +60,15 @@ npm run dev
 ```bash
 npm start
 ```
+
+## Timeout ayarları (504 / Cloudflare)
+
+Backend ve Cloudflare gateway timeout (~20s) nedeniyle servis yanıt süresi kısaltıldı:
+
+- PDP / AOD `page.goto`: 60s → 18s
+- Buybox / container `waitForSelector`: 45s → 10s, 30s → 8s
+- `page.reload`: 120s → 15s
+- Scroll döngüsü: 15 tur × 2.5s → 6 tur × 1.2s
+- Queue: EAGAIN sonrası bekleme 120s → 35s; başarı sonrası 60s → 8s
+
+Bu sayede tek istek tipik olarak 20s altında tamamlanabilir. Yavaş veya captcha sayfalarında timeout ile hata dönebilir; backend tarafında retry veya cache kullanılabilir.
