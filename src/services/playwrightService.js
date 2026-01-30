@@ -2370,10 +2370,17 @@ class PlaywrightService {
                       }
                     }
                     if (!sellerRatingCount) {
-                      const ratingCountMatch = ratingText.match(/\((\d{1,3}(?:,\d{3})*|\d+)\s*(?:ratings?|değerlendirme)\)/i);
+                      let ratingCountMatch = ratingText.match(/\((\d{1,3}(?:,\d{3})*|\d+)\s*(?:ratings?|değerlendirme)\)/i);
                       if (ratingCountMatch) {
                         sellerRatingCount = ratingCountMatch[1].replace(/,/g, '');
-                        console.log(`✅ [Playwright] Pinned offer sellerRatingCount: ${sellerRatingCount}`);
+                        console.log(`✅ [Playwright] Pinned offer sellerRatingCount (parantezli): ${sellerRatingCount}`);
+                      }
+                      if (!sellerRatingCount) {
+                        ratingCountMatch = ratingText.match(/(\d{1,3}(?:,\d{3})*|\d+)\s*ratings?/i);
+                        if (ratingCountMatch) {
+                          sellerRatingCount = ratingCountMatch[1].replace(/,/g, '');
+                          console.log(`✅ [Playwright] Pinned offer sellerRatingCount (parantezsiz): ${sellerRatingCount}`);
+                        }
                       }
                     }
                     if (!positivePercentage) {
@@ -2513,10 +2520,14 @@ class PlaywrightService {
                   const ratingMatch = t.match(/(\d+(?:\.\d+)?)\s+out of\s+5\s+stars/i);
                   if (ratingMatch) sellerRating = parseFloat(ratingMatch[1]);
                 }
-                // KRİTİK: Seller rating count
+                // KRİTİK: Seller rating count (parantezli veya parantezsiz)
                 if (!sellerRatingCount) {
-                  const ratingCountMatch = t.match(/\((\d{1,3}(?:,\d{3})*|\d+)\s*(?:ratings?|değerlendirme)\)/i);
+                  let ratingCountMatch = t.match(/\((\d{1,3}(?:,\d{3})*|\d+)\s*(?:ratings?|değerlendirme)\)/i);
                   if (ratingCountMatch) sellerRatingCount = ratingCountMatch[1].replace(/,/g, '');
+                  if (!sellerRatingCount) {
+                    ratingCountMatch = t.match(/(\d{1,3}(?:,\d{3})*|\d+)\s*ratings?/i);
+                    if (ratingCountMatch) sellerRatingCount = ratingCountMatch[1].replace(/,/g, '');
+                  }
                 }
                 // KRİTİK: Positive percentage
                 if (!positivePercentage) {
@@ -2559,12 +2570,19 @@ class PlaywrightService {
                     }
                   }
                   
-                  // KRİTİK: Seller rating count - "(33 ratings)" veya "(1 rating)" formatından çıkar
+                  // KRİTİK: Seller rating count - "(33 ratings)" veya "5,486 ratings" (parantezli/parantezsiz)
                   if (!sellerRatingCount) {
-                    const ratingCountMatch = ratingText.match(/\((\d{1,3}(?:,\d{3})*|\d+)\s*(?:ratings?|değerlendirme)\)/i);
+                    let ratingCountMatch = ratingText.match(/\((\d{1,3}(?:,\d{3})*|\d+)\s*(?:ratings?|değerlendirme)\)/i);
                     if (ratingCountMatch) {
                       sellerRatingCount = ratingCountMatch[1].replace(/,/g, '');
-                      console.log(`✅ [Playwright] Offer ${index} sellerRatingCount #aod-offer-seller-rating'den çekildi: ${sellerRatingCount}`);
+                      console.log(`✅ [Playwright] Offer ${index} sellerRatingCount #aod-offer-seller-rating'den: ${sellerRatingCount}`);
+                    }
+                    if (!sellerRatingCount) {
+                      ratingCountMatch = ratingText.match(/(\d{1,3}(?:,\d{3})*|\d+)\s*ratings?/i);
+                      if (ratingCountMatch) {
+                        sellerRatingCount = ratingCountMatch[1].replace(/,/g, '');
+                        console.log(`✅ [Playwright] Offer ${index} sellerRatingCount #aod-offer-seller-rating (parantezsiz): ${sellerRatingCount}`);
+                      }
                     }
                   }
                   
@@ -2581,6 +2599,34 @@ class PlaywrightService {
             } catch (ratingError) {
               console.warn(`⚠️ [Playwright] Offer ${index} rating bilgileri çekilirken hata: ${ratingError.message}`);
             }
+          }
+          
+          // KRİTİK: Pinned offer için son fallback - #aod-container tüm metninden rating parse et
+          if (isPinnedOffer && (!sellerRating || !sellerRatingCount) && index === 0) {
+            try {
+              const aodContainer = await page.$('#aod-container, #aod-offer-list, .aod-information-block').catch(() => null);
+              if (aodContainer) {
+                const fullText = await aodContainer.textContent().then(t => t && t.trim()).catch(() => null);
+                if (fullText && fullText.length > 50) {
+                  if (!sellerRating) {
+                    const m = fullText.match(/(?:Seller rating is\s+)?(\d+(?:\.\d+)?)\s+out of\s+5\s+stars/i);
+                    if (m) { sellerRating = parseFloat(m[1]); console.log(`✅ [Playwright] Pinned offer sellerRating aod-container fallback: ${sellerRating}`); }
+                  }
+                  if (!sellerRatingCount) {
+                    let m = fullText.match(/\((\d{1,3}(?:,\d{3})*|\d+)\s*(?:ratings?|değerlendirme)\)/i);
+                    if (m) { sellerRatingCount = m[1].replace(/,/g, ''); console.log(`✅ [Playwright] Pinned offer sellerRatingCount aod-container fallback: ${sellerRatingCount}`); }
+                    if (!sellerRatingCount) {
+                      m = fullText.match(/(\d{1,3}(?:,\d{3})*|\d+)\s*ratings?/i);
+                      if (m) { sellerRatingCount = m[1].replace(/,/g, ''); console.log(`✅ [Playwright] Pinned offer sellerRatingCount aod-container (parantezsiz): ${sellerRatingCount}`); }
+                    }
+                  }
+                  if (!positivePercentage) {
+                    const m = fullText.match(/(\d+(?:\.\d+)?)\s*%\s*positive/i);
+                    if (m) { positivePercentage = parseFloat(m[1]); console.log(`✅ [Playwright] Pinned offer positivePercentage aod-container fallback: ${positivePercentage}%`); }
+                  }
+                }
+              }
+            } catch (e) { /* ignore */ }
           }
         }
       } catch (e) {
@@ -3420,8 +3466,8 @@ class PlaywrightService {
             await seeMoreLink.click({ timeout: 10000 });
             console.log(`✅ [Playwright] "See more" linkine tıklandı`);
             // KRİTİK: #aod-offer-seller-rating / seller-rating-count-* görünene kadar bekle (rating bu blokta)
-            await page.waitForSelector('#aod-offer-seller-rating, [id^="seller-rating-count-"]', { timeout: 5000, state: 'visible' }).catch(() => null);
-            await this.safeWait(page, 1500); // Ek içeriğin render olması için
+            await page.waitForSelector('#aod-offer-seller-rating, [id^="seller-rating-count-"]', { timeout: 10000, state: 'visible' }).catch(() => null);
+            await this.safeWait(page, 2500); // Ek içeriğin render olması için
           } catch (clickError) {
             console.warn(`⚠️ [Playwright] "See more" linkine tıklanamadı: ${clickError.message}`);
           }
