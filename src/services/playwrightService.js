@@ -1,9 +1,11 @@
 // Playwright Service - Seller Information Extraction
+// KRİTİK: Tarayıcı ASLA kapanmaz — process sona erene kadar açık kalır.
+// 10 sekme pool ile en fazla 10 ASIN paralel işlenir; sekme sayfaları da kapatılmaz, tekrar kullanılır.
 const { chromium } = require('playwright');
 
 class PlaywrightService {
   constructor() {
-    console.log('✅ [Seller Playwright] Initializing (10 sekme, browser bir kere — vixify-playwright-service-batch mantığı)...');
+    console.log('✅ [Seller Playwright] Initializing (10 sekme, browser asla kapanmaz — vixify-playwright-service-batch mantığı)...');
     this.browser = null;
     this.browserLaunchPromise = null;
     this.contexts = new Map();
@@ -84,6 +86,7 @@ class PlaywrightService {
       const res = await this.selectCountryAndCurrency(setupPage, targetCountryCode, sourceMarketplace, baseUrl);
       if (!res.success) console.warn('⚠️ [Seller Playwright] Context ülke seçimi başarısız:', res.error);
     }
+    // setupPage sadece ülke/para birimi seçimi için geçici — kapatılır. Browser ve pool sayfaları ASLA kapatılmaz.
     await setupPage.close().catch(() => {});
     this.contexts.set(key, context);
     this.contextSetupStatus.set(key, true);
@@ -99,6 +102,7 @@ class PlaywrightService {
         console.log(`♻️ [Seller Playwright] Page pool reuse: ${key} (${pages.length} sekme)`);
         return pages;
       }
+      // Sadece bozuk/kapalı sayfalar için pool yeniden oluşturulur — browser ASLA kapatılmaz
       (this.pagePools.get(key) || []).forEach(p => p.close().catch(() => {}));
     }
     const ctx = await this.getOrCreateContext(sourceMarketplace, targetCountryCode);
@@ -3485,8 +3489,8 @@ class PlaywrightService {
         const scrollableSelectors = ['#aod-offer-list', '#aod-container', '#all-offers-display', '.aod-offer-list'];
         let lastCount = 0;
         let stableRounds = 0;
-        const maxScrollRounds = 6;
-        const scrollWaitMs = 1200;
+        const maxScrollRounds = 12;
+        const scrollWaitMs = 1500;
         for (let round = 0; round < maxScrollRounds; round++) {
           const count = await page.$$eval('div[id^="aod-offer-"]', els => els.length).catch(() => 0);
           if (totalSellers > 0 && count >= totalSellers) {
