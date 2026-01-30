@@ -2259,18 +2259,25 @@ class PlaywrightService {
           console.log(`✅ [Playwright] Offer ${index} soldBy offer element'inden çekildi: ${soldBy} -> sellerName: ${sellerName}`);
         }
         
-        // Seller rating - "Seller rating is 5 out of 5 stars"
+        // Seller rating - "4.3 out of 5 stars" veya "Seller rating is 5 out of 5 stars"
         const ratingMatch = offerText.match(/(\d+(?:\.\d+)?)\s+out of\s+5\s+stars/i);
         if (ratingMatch) {
           sellerRating = parseFloat(ratingMatch[1]);
           console.log(`✅ [Playwright] Offer ${index} sellerRating offer element'inden çekildi: ${sellerRating}`);
         }
         
-        // KRİTİK: Seller rating count - "(77 ratings)" veya "(1,234 ratings)" formatından çıkar
-        const ratingCountMatch = offerText.match(/\((\d{1,3}(?:,\d{3})*|\d+)\s*(?:ratings?|değerlendirme)\)/i);
+        // Seller rating count - "(77 ratings)" veya "5,486 ratings" (parantezli/parantezsiz)
+        let ratingCountMatch = offerText.match(/\((\d{1,3}(?:,\d{3})*|\d+)\s*(?:ratings?|değerlendirme)\)/i);
         if (ratingCountMatch) {
           sellerRatingCount = ratingCountMatch[1].replace(/,/g, '');
-          console.log(`✅ [Playwright] Offer ${index} sellerRatingCount offer element'inden çekildi: ${sellerRatingCount}`);
+          console.log(`✅ [Playwright] Offer ${index} sellerRatingCount offer element'inden çekildi (parantezli): ${sellerRatingCount}`);
+        }
+        if (!sellerRatingCount) {
+          ratingCountMatch = offerText.match(/(\d{1,3}(?:,\d{3})*|\d+)\s*ratings?/i);
+          if (ratingCountMatch) {
+            sellerRatingCount = ratingCountMatch[1].replace(/,/g, '');
+            console.log(`✅ [Playwright] Offer ${index} sellerRatingCount offer element'inden çekildi (parantezsiz): ${sellerRatingCount}`);
+          }
         }
         
         // KRİTİK: Positive percentage - "100% positive" veya "98% positive" formatından çıkar
