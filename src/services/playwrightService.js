@@ -2835,165 +2835,32 @@ class PlaywrightService {
       const baseDomain = marketplaceDomain[sourceMarketplace] || 'www.amazon.com';
       const baseUrl = `https://${baseDomain}`;
       
-      // Product URL oluştur
+      // KRİTİK: Ülke/para seçimi sonrası doğrudan AOD URL (olp-opf-redir) — scroll yok, sadece #aod-filter-offer-count-string kadar
       const productUrl = `${baseUrl}/dp/${asin}`;
-      console.log(`🌐 [Playwright] Sayfa açılıyor: ${productUrl}`);
-
-      // Sayfayı yükle (Cloudflare/backend 20s limiti için 18s - hızlı yanıt)
-      await page.goto(productUrl, { 
-        waitUntil: 'domcontentloaded',
-        timeout: 18000 
-      });
-      await this.safeWait(page, 1500);
-      // Ülke/para birimi getOrCreateContext'te yapıldı — pool/shared kullanırken bu blok atlanır
+      const directAodUrl = `${baseUrl}/dp/${asin}/ref=olp-opf-redir?aod=1&ie=UTF8&condition=NEW&th=1`;
+      
+      // İlk navigasyon: ülke seçimi gerekiyorsa baseUrl, değilse direkt AOD
       if (targetCountry && !usePool && !opts.sharedPage) {
+        console.log(`🌐 [Playwright] Amazon ana sayfa açılıyor (ülke seçimi için): ${baseUrl}`);
+        await page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 18000 });
+        await this.safeWait(page, 1500);
         console.log(`🌍 [Playwright] Ülke ve para birimi seçimi yapılıyor: ${targetCountry}`);
         const countrySelectionResult = await this.selectCountryAndCurrency(page, targetCountry, sourceMarketplace, productUrl);
         if (!countrySelectionResult.success) {
           console.warn(`⚠️ [Playwright] Ülke ve para birimi seçimi başarısız: ${countrySelectionResult.error}`);
         } else {
           console.log(`✅ [Playwright] Ülke ve para birimi seçimi tamamlandı`);
-          const currentUrl = page.url();
-          const isOnAsinPage = currentUrl.includes('/dp/');
-          const needsNavigation = !isOnAsinPage;
-          
-          if (needsNavigation) {
-            console.log(`🔗 [Playwright] ASIN sayfasına geri dönülüyor: ${productUrl}`);
-            try {
-              // KRİTİK: domcontentloaded + kısa timeout (Cloudflare 20s limiti)
-              await page.goto(productUrl, { waitUntil: 'domcontentloaded', timeout: 18000 });
-              console.log(`✅ [Playwright] ASIN sayfası DOM yüklendi`);
-              
-              await this.safeWait(page, 1500);
-              
-              console.log(`⏳ [Playwright] Buybox container'ının yüklenmesi bekleniyor...`);
-              try {
-                await page.waitForSelector('#desktop_buybox, #buybox, #qualifiedBuybox, #apex_offerDisplay_single_desktop, #apex_offerDisplay_desktop', { 
-                  timeout: 10000, 
-                  state: 'attached' 
-                });
-                console.log(`✅ [Playwright] Buybox container bulundu`);
-              } catch (selectorError) {
-                console.warn(`⚠️ [Playwright] Buybox container selector bulunamadı, devam ediliyor...`);
-                // Ekstra bekleme - belki yükleniyor
-                await this.safeWait(page, 5000);
-              }
-              
-              // Ekstra bekleme - shipping bilgilerinin render olması için
-              await this.safeWait(page, 3000);
-              
-              // KRİTİK: Network idle bekleme - timeout'u kısalt (çok katı olabilir)
-              // Amazon sayfaları bazen network idle olmuyor, bu yüzden timeout'u kısalt
-              try {
-                await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {
-                  console.warn(`⚠️ [Playwright] Network idle bekleme timeout, devam ediliyor...`);
-                });
-              } catch (networkError) {
-                // Network idle bekleme başarısız olsa bile devam et
-                console.warn(`⚠️ [Playwright] Network idle bekleme hatası: ${networkError.message}`);
-              }
-              
-              // KRİTİK: Sayfa title'ını kontrol et - eğer sadece "Amazon.com" ise sayfa tam yüklenmemiş olabilir
-              const pageTitle = await page.title().catch(() => '');
-              if (pageTitle === 'Amazon.com' || pageTitle === 'Amazon' || !pageTitle) {
-                console.warn(`⚠️ [Playwright] Sayfa title sadece "Amazon.com" - sayfa tam yüklenmemiş olabilir, ekstra bekleme...`);
-                await this.safeWait(page, 5000);
-              }
-            } catch (gotoError) {
-              console.error(`❌ [Playwright] ASIN sayfasına dönüş hatası: ${gotoError.message}`);
-              // Hata olsa bile devam et - belki sayfa zaten yüklü
-              // Sayfanın mevcut durumunu kontrol et
-              try {
-                const currentUrl = page.url();
-                if (currentUrl.includes('/dp/')) {
-                  console.log(`✅ [Playwright] Sayfa zaten ASIN sayfasında: ${currentUrl}`);
-                  await this.safeWait(page, 5000);
-                } else {
-                  // Sayfa yüklenmemiş, tekrar dene
-                  console.log(`🔄 [Playwright] Sayfa yüklenmemiş, tekrar deneniyor...`);
-                  await page.goto(productUrl, { waitUntil: 'domcontentloaded', timeout: 18000 }).catch(() => {
-                    console.warn(`⚠️ [Playwright] İkinci deneme de başarısız, mevcut sayfayla devam ediliyor...`);
-                  });
-                  await this.safeWait(page, 5000);
-                }
-              } catch (retryError) {
-                console.warn(`⚠️ [Playwright] Retry hatası: ${retryError.message}, mevcut sayfayla devam ediliyor...`);
-                await this.safeWait(page, 5000);
-              }
-            }
-          } else {
-            console.log(`✅ [Playwright] Sayfa zaten ASIN sayfasında: ${currentUrl}`);
-            // Sayfa zaten ASIN sayfasında, buybox'ın yüklenmesini bekle
-            await this.safeWait(page, 3000);
-          }
-          
-          // Buybox container'ını bekle (her durumda) - daha esnek selector'lar
-          console.log(`⏳ [Playwright] Buybox container'ının varlığı kontrol ediliyor...`);
-          try {
-            await page.waitForSelector('#desktop_buybox, #buybox, #qualifiedBuybox, #apex_offerDisplay_single_desktop, #apex_offerDisplay_desktop, #corePrice_feature_div', { 
-              timeout: 10000,
-              state: 'attached'
-            });
-            console.log(`✅ [Playwright] Buybox container doğrulandı`);
-          } catch (selectorError) {
-            console.warn(`⚠️ [Playwright] Buybox container bulunamadı, shipping bilgileri çekilmeye devam ediliyor...`);
-            // Ekstra bekleme - belki yükleniyor
-            await this.safeWait(page, 3000);
-          }
         }
       }
       
-      // KRİTİK: Buybox bilgilerini çek (PDP sayfasından) - AOD'ye gitmeden önce
-      // KRİTİK: Shipping bilgileri çekilemediğinde retry mekanizması
-      console.log(`🛒 [Playwright] Buybox bilgileri çekiliyor (PDP sayfasından)...`);
-      let buyboxData = await this.extractBuyboxData(page);
+      // Direkt AOD URL — ülke seçimi sonrası veya pool'dan
+      console.log(`🔗 [Playwright] AOD sayfasına gidiliyor: ${directAodUrl}`);
+      await page.goto(directAodUrl, { waitUntil: 'domcontentloaded', timeout: 18000 });
+      await this.safeWait(page, 2000);
       
-      // Eğer shipping bilgileri eksikse, sayfayı yeniden yükle ve tekrar dene
-      if (!buyboxData || (!buyboxData.standardShippingPrice && !buyboxData.standardDeliveryDate && !buyboxData.sellerName)) {
-        console.warn(`⚠️ [Playwright] Buybox bilgileri eksik veya null, sayfa yeniden yükleniyor ve tekrar deneniyor...`);
-        try {
-          await page.reload({ waitUntil: 'domcontentloaded', timeout: 15000 });
-          await this.safeWait(page, 1500);
-          
-          try {
-            await page.waitForSelector('#desktop_buybox, #buybox, #qualifiedBuybox, #apex_offerDisplay_single_desktop, #apex_offerDisplay_desktop', { 
-              timeout: 8000, 
-              state: 'attached' 
-            });
-          } catch (e) {
-            console.warn(`⚠️ [Playwright] Buybox container retry'de bulunamadı`);
-          }
-          
-          await this.safeWait(page, 1000);
-          
-          // Tekrar dene
-          buyboxData = await this.extractBuyboxData(page);
-        } catch (retryError) {
-          console.warn(`⚠️ [Playwright] Buybox bilgileri retry hatası: ${retryError.message}`);
-        }
-      }
-      
-      if (buyboxData) {
-        console.log(`✅ [Playwright] Buybox bilgileri çekildi: ${buyboxData.sellerName || 'N/A'}, $${buyboxData.price || 'N/A'}, Shipping: $${buyboxData.standardShippingPrice || 'N/A'}, Date: ${buyboxData.standardDeliveryDate || 'N/A'}`);
-      } else {
-        console.warn(`⚠️ [Playwright] Buybox bilgileri çekilemedi`);
-      }
-
-      // Seller bilgilerini çekme mantığı
-      console.log(`🛒 [Playwright] Seller bilgileri çekiliyor...`);
-      
-      // KRİTİK: Ülke + para birimi seçildikten sonra AOD sayfasına sabit link formatıyla git
-      // Envanterde yüklü her ASIN için sadece ASIN değişecek
-      let isOnAodPage = false;
-      const directAodUrl = `${baseUrl}/dp/${asin}/ref=olp-opf-redir?aod=1&ie=UTF8&condition=NEW&th=1`;
-      console.log(`🔗 [Playwright] AOD sayfasına gidiliyor (sabit link): ${directAodUrl}`);
-      try {
-        await page.goto(directAodUrl, { waitUntil: 'domcontentloaded', timeout: 18000 });
-        isOnAodPage = true;
-      } catch (e) {
-        console.warn(`⚠️ [Playwright] AOD sabit link ile açılamadı, eski yönteme düşülüyor: ${e.message}`);
-        isOnAodPage = false;
-      }
+      // Buybox AOD pinned offer'dan gelecek — PDP atlandı
+      let buyboxData = null;
+      let isOnAodPage = true;
 
       // Captcha sayfası kontrolü (AOD linkinde çıkabiliyor)
       try {
@@ -3482,56 +3349,8 @@ class PlaywrightService {
         console.warn(`⚠️ [Playwright] "See more" linki kontrol edilemedi: ${e.message}`);
       }
       
-      // KRİTİK: Amazon AOD lazy-load kullanıyor — aşağı scroll etmeden sadece ilk birkaç satıcı DOM'da olur.
-      // Tüm satıcıları görmek için offer listesi container'ını tekrar tekrar scroll edip yeni offer'ların
-      // yüklenmesini tetikleyelim (3–5+ satıcılı ürünlerde diğer satıcılar böyle görünür).
-      try {
-        const scrollableSelectors = ['#aod-offer-list', '#aod-container', '#all-offers-display', '.aod-offer-list'];
-        let lastCount = 0;
-        let stableRounds = 0;
-        const maxScrollRounds = 12;
-        const scrollWaitMs = 1500;
-        for (let round = 0; round < maxScrollRounds; round++) {
-          const count = await page.$$eval('div[id^="aod-offer-"]', els => els.length).catch(() => 0);
-          if (totalSellers > 0 && count >= totalSellers) {
-            console.log(`✅ [Playwright] Lazy-load scroll: ${count} offer yüklendi (hedef: ${totalSellers}), scroll tamamlandı`);
-            break;
-          }
-          if (count === lastCount) {
-            stableRounds++;
-            if (stableRounds >= 2) {
-              console.log(`✅ [Playwright] Lazy-load scroll: offer sayısı sabit (${count}), scroll tamamlandı`);
-              break;
-            }
-          } else {
-            stableRounds = 0;
-          }
-          lastCount = count;
-          let scrolled = false;
-          for (const sel of scrollableSelectors) {
-            try {
-              const el = await page.$(sel).catch(() => null);
-              if (el) {
-                await el.evaluate(node => node.scrollTop = node.scrollHeight).catch(() => {});
-                scrolled = true;
-                await this.safeWait(page, 400);
-                break;
-              }
-            } catch (e) { /* skip */ }
-          }
-          if (!scrolled) {
-            await page.evaluate(() => {
-              const list = document.querySelector('#aod-offer-list') || document.querySelector('#aod-container');
-              if (list) list.scrollTop = list.scrollHeight;
-              else window.scrollBy(0, 400);
-            }).catch(() => {});
-          }
-          await this.safeWait(page, scrollWaitMs);
-          if (round === 0) console.log(`🔄 [Playwright] Lazy-load scroll başladı (mevcut offer: ${count}${totalSellers ? `, hedef: ${totalSellers}` : ''})`);
-        }
-      } catch (e) {
-        console.warn(`⚠️ [Playwright] Lazy-load scroll hatası (devam ediliyor): ${e.message}`);
-      }
+      // KRİTİK: Scroll KALDIRILDI — #aod-filter-offer-count-string ("4 other options" = 5 satıcı) ile sınırlı
+      // Gereksiz scroll 92+ satıcı yüklüyordu; sadece sayfa bildirdiği kadar işle
       
       // Tüm seller offer'larını çek - KRİTİK: Sidebar'dan tüm bilgileri çek
       const sellers = [];
@@ -3552,13 +3371,16 @@ class PlaywrightService {
           console.warn(`⚠️ [Playwright] Pinned offer çekilemedi: ${e.message}`);
         }
         
-        // Tüm "other" offer'ları bul — div[id^="aod-offer-"] (aod-offer-0, aod-offer-1, ...); yoksa #aod-offer fallback
-        let offerElements = await page.$$('div[id^="aod-offer-"]');
+        // Sadece gerçek offer container'ları — #aod-offer-list > div.a-section (her biri bir satıcı)
+        // div[id^="aod-offer-"] aod-offer-shipsFrom vb. dahil çok fazla eşleşme veriyordu
+        let offerElements = await page.$$('#aod-offer-list > div.a-section');
         if (offerElements.length === 0) {
-          const legacyOffer = await page.$('#aod-offer').catch(() => null);
-          if (legacyOffer) offerElements = [legacyOffer];
+          offerElements = await page.$$('#aod-offer-list > div').catch(() => []);
         }
-        console.log(`🔍 [Playwright] ${offerElements.length} seller offer bulundu (sidebar'dan çekilecek)${totalSellers ? ` (sayfa bildirimi: ${totalSellers})` : ''}`);
+        // Sadece totalSellers-1 kadar işle (1 pinned zaten çekildi)
+        const maxOther = totalSellers > 0 ? Math.min(totalSellers - 1, offerElements.length) : offerElements.length;
+        offerElements = offerElements.slice(0, maxOther);
+        console.log(`🔍 [Playwright] ${offerElements.length} diğer satıcı işlenecek (toplam hedef: ${totalSellers})`);
         
         for (let i = 0; i < offerElements.length; i++) {
           const offer = offerElements[i];
