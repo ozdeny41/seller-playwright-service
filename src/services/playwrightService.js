@@ -2768,6 +2768,15 @@ class PlaywrightService {
         isSBA = false;
       }
       
+      // KRİTİK: SBA (Amazon satıyor) ve seller bilgisi yoksa "Amazon" kullan — frontend merge eşleşebilsin
+      const nameForMerge = (soldBy || sellerName || '').trim();
+      const isNameEmpty = !nameForMerge || nameForMerge.toLowerCase() === 'n/a' || nameForMerge.toLowerCase() === 'n.a.';
+      if (isSBA && isNameEmpty) {
+        sellerName = 'Amazon';
+        soldBy = 'Amazon';
+        console.log(`✅ [Playwright] Offer ${index} SBA ama seller yok — "Amazon" set edildi (frontend merge için)`);
+      }
+      
       return {
         index: index,
         condition: condition,
