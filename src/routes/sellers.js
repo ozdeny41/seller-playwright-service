@@ -83,8 +83,8 @@ class RequestQueue {
   }
 }
 
-// Global queue instance
-const requestQueue = new RequestQueue(1);
+// Global queue instance — 2 paralel: source + target product-offers aynı anda çalışsın (260s timeout önleme)
+const requestQueue = new RequestQueue(2);
 
 /**
  * POST /api/sellers
