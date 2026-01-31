@@ -1,11 +1,9 @@
 // Playwright Service - Seller Information Extraction
-// KRİTİK: Tarayıcı ASLA kapanmaz — process sona erene kadar açık kalır.
-// 10 sekme pool ile en fazla 10 ASIN paralel işlenir; sekme sayfaları da kapatılmaz, tekrar kullanılır.
 const { chromium } = require('playwright');
 
 class PlaywrightService {
   constructor() {
-    console.log('✅ [Seller Playwright] Initializing (10 sekme, browser asla kapanmaz — vixify-playwright-service-batch mantığı)...');
+    console.log('✅ [Seller Playwright] Initializing (10 sekme, browser bir kere — vixify-playwright-service-batch mantığı)...');
     this.browser = null;
     this.browserLaunchPromise = null;
     this.contexts = new Map();
@@ -71,6 +69,7 @@ class PlaywrightService {
       this.pagePoolIndex.delete(key);
     }
     const browser = await this.getBrowser();
+    console.log(`📄 [Seller Playwright] Context oluşturuluyor: ${key}`);
     const context = await browser.newContext({
       viewport: { width: 1920, height: 1080 },
       userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -79,15 +78,28 @@ class PlaywrightService {
     });
     const marketplaceDomain = { 'amazon.com': 'www.amazon.com', 'amazon.co.uk': 'www.amazon.co.uk', 'amazon.de': 'www.amazon.de', 'amazon.es': 'www.amazon.es', 'amazon.it': 'www.amazon.it', 'amazon.fr': 'www.amazon.fr', 'amazon.co.jp': 'www.amazon.co.jp' };
     const baseUrl = `https://${marketplaceDomain[sourceMarketplace] || 'www.amazon.com'}`;
-    const setupPage = await context.newPage();
-    await setupPage.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
-    await this.safeWait(setupPage, 2000);
-    if (targetCountryCode) {
+
+    // KRİTİK: targetCountry yoksa setup atla — direkt AOD'a gidilecek, Amazon ana sayfa yüklemesi gereksiz (timeout/captcha riski)
+    if (!targetCountryCode) {
+      console.log(`⚡ [Seller Playwright] targetCountry yok, setup atlanıyor — direkt AOD kullanılacak`);
+    } else {
+      const setupPage = await context.newPage();
+      console.log(`🌐 [Seller Playwright] Setup sayfası açılıyor: ${baseUrl}`);
+      try {
+        await setupPage.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 25000 });
+        console.log(`✅ [Seller Playwright] Setup sayfası yüklendi`);
+      } catch (gotoErr) {
+        console.error(`❌ [Seller Playwright] Setup sayfası yükleme hatası: ${gotoErr.message}`);
+        await setupPage.close().catch(() => {});
+        throw gotoErr;
+      }
+      await this.safeWait(setupPage, 2000);
+      console.log(`🌍 [Seller Playwright] Ülke ve para birimi seçimi başlatılıyor: ${targetCountryCode}`);
       const res = await this.selectCountryAndCurrency(setupPage, targetCountryCode, sourceMarketplace, baseUrl);
       if (!res.success) console.warn('⚠️ [Seller Playwright] Context ülke seçimi başarısız:', res.error);
+      else console.log(`✅ [Seller Playwright] Ülke/para birimi seçimi tamamlandı`);
+      await setupPage.close().catch(() => {});
     }
-    // setupPage sadece ülke/para birimi seçimi için geçici — kapatılır. Browser ve pool sayfaları ASLA kapatılmaz.
-    await setupPage.close().catch(() => {});
     this.contexts.set(key, context);
     this.contextSetupStatus.set(key, true);
     console.log(`✅ [Seller Playwright] Yeni context: ${key}`);
@@ -102,7 +114,6 @@ class PlaywrightService {
         console.log(`♻️ [Seller Playwright] Page pool reuse: ${key} (${pages.length} sekme)`);
         return pages;
       }
-      // Sadece bozuk/kapalı sayfalar için pool yeniden oluşturulur — browser ASLA kapatılmaz
       (this.pagePools.get(key) || []).forEach(p => p.close().catch(() => {}));
     }
     const ctx = await this.getOrCreateContext(sourceMarketplace, targetCountryCode);
@@ -124,11 +135,13 @@ class PlaywrightService {
   }
 
   /**
-   * Safe wait - setTimeout kullan (Playwright waitForTimeout kaldırıldı; Railway uyumluluk)
+   * Safe wait function - checks if page is still valid before waiting
    */
   async safeWait(page, ms) {
     try {
-      await new Promise(r => setTimeout(r, ms));
+      if (page && !page.isClosed()) {
+        await page.waitForTimeout(ms);
+      }
     } catch (e) {
       console.warn(`⚠️ [Playwright] Safe wait error: ${e.message}`);
     }
@@ -170,28 +183,22 @@ class PlaywrightService {
 
   /**
    * Convert navbar country code to Amazon country code
+   * KRİTİK: amazon.co.uk, amazon.de gibi domain'ler de kabul edilir
    */
   convertToAmazonCountryCode(countryCode) {
+    if (!countryCode || typeof countryCode !== 'string') return 'US';
+    const raw = countryCode.toString().trim().toLowerCase();
     const map = {
-      'usa': 'US',
-      'us': 'US',
-      'uk': 'GB',
-      'germany': 'DE',
-      'de': 'DE',
-      'france': 'FR',
-      'fr': 'FR',
-      'italy': 'IT',
-      'it': 'IT',
-      'spain': 'ES',
-      'es': 'ES',
-      'japan': 'JP',
-      'jp': 'JP',
-      'canada': 'CA',
-      'ca': 'CA',
-      'australia': 'AU',
-      'au': 'AU'
+      'usa': 'US', 'us': 'US', 'america': 'US', 'united states': 'US',
+      'uk': 'GB', 'gb': 'GB', 'germany': 'DE', 'de': 'DE', 'france': 'FR', 'fr': 'FR',
+      'italy': 'IT', 'it': 'IT', 'spain': 'ES', 'es': 'ES', 'japan': 'JP', 'jp': 'JP',
+      'canada': 'CA', 'ca': 'CA', 'australia': 'AU', 'au': 'AU',
+      'netherlands': 'NL', 'nl': 'NL', 'belgium': 'BE', 'be': 'BE',
+      'singapore': 'SG', 'sg': 'SG', 'mexico': 'MX', 'mx': 'MX',
+      'amazon.com': 'US', 'amazon.co.uk': 'GB', 'amazon.de': 'DE', 'amazon.fr': 'FR',
+      'amazon.it': 'IT', 'amazon.es': 'ES', 'amazon.co.jp': 'JP', 'amazon.ca': 'CA'
     };
-    return map[countryCode?.toLowerCase()] || countryCode?.toUpperCase() || 'US';
+    return map[raw] || (raw.length === 2 ? raw.toUpperCase() : 'US');
   }
 
   /**
@@ -208,6 +215,17 @@ class PlaywrightService {
       const amazonCountryCode = this.convertToAmazonCountryCode(targetCountryCode);
       const targetCountryName = this.getCountryName(amazonCountryCode);
       console.log(`🎭 [Playwright] Ülke seçimi başlatılıyor: ${targetCountryCode} -> ${amazonCountryCode} (${targetCountryName})`);
+
+      // KRİTİK: Kaynak marketplace zaten hedef ülkeyse ülke seçimini atla (amazon.co.uk + uk gibi)
+      const marketplaceToCountry = {
+        'amazon.com': 'US', 'amazon.co.uk': 'GB', 'amazon.de': 'DE', 'amazon.fr': 'FR',
+        'amazon.it': 'IT', 'amazon.es': 'ES', 'amazon.co.jp': 'JP', 'amazon.ca': 'CA'
+      };
+      const sourceCountry = marketplaceToCountry[sourceMarketplace];
+      if (sourceCountry && amazonCountryCode === sourceCountry) {
+        console.log(`✅ [Playwright] Kaynak marketplace zaten hedef ülke (${sourceMarketplace} = ${amazonCountryCode}), ülke seçimi atlanıyor`);
+        return { success: true };
+      }
       
       // Para birimi seçimi - Kaynak mağazaya göre para birimi seçilmeli
       const marketplaceCurrency = {
@@ -432,7 +450,7 @@ class PlaywrightService {
       
       console.log(`🎭 [Playwright] "Deliver to" butonu aranıyor...`);
       const deliverToSelectors = [
-        '#nav-global-location-popover-link', // Öncelikli selector
+        '#nav-global-location-popover-link', // Öncelikli selector (tüm Amazon sitelerinde aynı)
         'a#nav-global-location-popover-link',
         'span#nav-global-location-popover-link',
         'a[data-csa-c-type="button"][id*="nav-global-location"]',
@@ -440,6 +458,14 @@ class PlaywrightService {
         'span[id*="nav-global-location"]',
         'a[aria-label*="Deliver to"]',
         'span[aria-label*="Deliver to"]',
+        'a[aria-label*="Lieferung"]',
+        'span[aria-label*="Lieferung"]',
+        'a[aria-label*="Livraison"]',
+        'span[aria-label*="Livraison"]',
+        'a[aria-label*="Envío"]',
+        'span[aria-label*="Envío"]',
+        'a[aria-label*="Spedizione"]',
+        'span[aria-label*="Spedizione"]',
         'a:has-text("Deliver to")',
         'span:has-text("Deliver to")',
         '#nav-global-location-slot',
@@ -574,16 +600,18 @@ class PlaywrightService {
         }
       }
       
-      // Son çare: Sayfa içeriğinde "Deliver to" text'ini ara
+      // Son çare: Sayfa içeriğinde "Deliver to" (veya dil karşılığı) text'ini ara
       if (!deliverToButton) {
+        const deliverToTexts = ['Deliver to', 'Lieferung an', 'Livraison à', 'Envío a', 'Spedizione a', '配達先'];
         console.log(`🔍 [Playwright] "Deliver to" butonu selector'larla bulunamadı, sayfa içeriğinde aranıyor...`);
         try {
           const allLinks = await page.$$('a, span, button');
           for (const link of allLinks) {
             try {
-              const text = await link.textContent();
-              const ariaLabel = await link.getAttribute('aria-label');
-              if ((text && text.includes('Deliver to')) || (ariaLabel && ariaLabel.includes('Deliver to'))) {
+              const text = (await link.textContent()) || '';
+              const ariaLabel = (await link.getAttribute('aria-label')) || '';
+              const combined = `${text} ${ariaLabel}`;
+              if (deliverToTexts.some(t => combined.includes(t))) {
                 deliverToButton = link;
                 foundSelector = 'text-content-search';
                 console.log(`✅ [Playwright] "Deliver to" butonu text içeriğinden bulundu`);
@@ -715,13 +743,22 @@ class PlaywrightService {
       }
       
       // KRİTİK: Dropdown açıldıktan sonra ülkenin baş harfine basarak filtreleme yap
-      // Navbar'da hangi ülke seçili ise o ülkenin baş harfi seçilerek yapılmalı
+      // amazon.de, amazon.fr vb. sitelerde ülke adları farklı dilde — locale-aware ilk harf kullan
       let firstLetter = null;
-      // KRİTİK: Navbar'daki mevcut ülke (örn: Netherlands) bazen hedef ülke değil.
-      // Bu yüzden filtrelemeyi HER ZAMAN hedef ülkenin baş harfiyle yap.
-      if (targetCountryName) {
+      const localeFirstLetter = {
+        'amazon.de': { GB: 'V', US: 'V', DE: 'D', FR: 'F', ES: 'S', IT: 'I', JP: 'J', NL: 'N' },
+        'amazon.fr': { GB: 'R', US: 'E', DE: 'A', FR: 'F', ES: 'E', IT: 'I', JP: 'J', NL: 'P' },
+        'amazon.es': { GB: 'R', US: 'E', DE: 'A', FR: 'F', ES: 'E', IT: 'I', JP: 'J', NL: 'P' },
+        'amazon.it': { GB: 'R', US: 'S', DE: 'G', FR: 'F', ES: 'S', IT: 'I', JP: 'G', NL: 'P' },
+        'amazon.co.jp': { GB: 'イ', US: 'ア', DE: 'ド', FR: 'フ', ES: 'ス', IT: 'イ', JP: '日', NL: 'オ' }
+      };
+      const mpMap = localeFirstLetter[sourceMarketplace];
+      if (mpMap && mpMap[amazonCountryCode]) {
+        firstLetter = mpMap[amazonCountryCode];
+        console.log(`🌍 [Playwright] Locale-aware baş harf: "${firstLetter}" (${sourceMarketplace}, ${amazonCountryCode})`);
+      } else if (targetCountryName) {
         firstLetter = targetCountryName.charAt(0).toUpperCase();
-        console.log(`🌍 [Playwright] TargetCountryName'den baş harf alındı: "${firstLetter}" (${targetCountryName})`);
+        console.log(`🌍 [Playwright] TargetCountryName'den baş harf: "${firstLetter}" (${targetCountryName})`);
       }
       
       // Dropdown açıldıktan sonra ülkenin baş harfine bas
@@ -887,15 +924,14 @@ class PlaywrightService {
       
       // Done butonuna tıkla
       console.log(`🎭 [Playwright] "Done" butonu aranıyor...`);
+      // KRİTİK: name="glowDoneButton" sabit; #a-autoid-* dinamik ID'ler değişebilir — önce sabit selector
       const doneButtonSelectors = [
-        'button#a-autoid-28-announce[name="glowDoneButton"]', // KRİTİK: Kullanıcının verdiği DOM path (B0G5C4GTGQ için)
-        'button#a-autoid-31-announce[name="glowDoneButton"]', // Alternatif ID
         'button[name="glowDoneButton"]',
         'button.a-button-text[name="glowDoneButton"]',
         'span.a-button-inner button[name="glowDoneButton"]',
         'input[name="glowDoneButton"]',
-        '#a-autoid-28-announce', // Fallback: ID ile (B0G5C4GTGQ için)
-        '#a-autoid-31-announce' // Fallback: Alternatif ID
+        'button[data-action="glowDoneButton"]',
+        '[name="glowDoneButton"]'
       ];
       
       let doneButton = null;
@@ -926,8 +962,8 @@ class PlaywrightService {
         console.log(`⚠️ [Playwright] Normal click başarısız, JS click deneniyor: ${clickError.message}`);
         await page.evaluate(() => {
           const btn = document.querySelector('button[name="glowDoneButton"]') || 
-                     document.querySelector('#a-autoid-28-announce') ||
-                     document.querySelector('#a-autoid-31-announce');
+                     document.querySelector('[name="glowDoneButton"]') ||
+                     document.querySelector('button[data-action="glowDoneButton"]');
           if (btn) btn.click();
         });
         await this.safeWait(page, 2000);
@@ -2201,21 +2237,15 @@ class PlaywrightService {
             try {
               const shipsFromElement = await page.$('#aod-offer-shipsFrom').catch(() => null);
               if (shipsFromElement) {
-                let shipsFromText = await shipsFromElement.textContent().then(t => t && t.trim()).catch(() => null);
+                const shipsFromText = await shipsFromElement.textContent().then(t => t.trim()).catch(() => null);
                 if (shipsFromText) {
+                  // "Ships from Amazon.com" formatından "Amazon.com" çıkar
                   const shipsFromMatch = shipsFromText.match(/Ships from\s+(.+)/i);
                   if (shipsFromMatch) {
                     shipsFrom = shipsFromMatch[1].trim();
                     console.log(`✅ [Playwright] Offer ${index} shipsFrom sidebar'dan çekildi: ${shipsFrom}`);
                   } else {
                     shipsFrom = shipsFromText.replace(/Ships from\s*/i, '').trim();
-                  }
-                }
-                if (!shipsFrom) {
-                  const valueCol = await shipsFromElement.$('.a-col-right span, .a-color-base').catch(() => null);
-                  if (valueCol) {
-                    shipsFrom = await valueCol.textContent().then(t => t && t.trim()).catch(() => null) || shipsFrom;
-                    if (shipsFrom) console.log(`✅ [Playwright] Offer ${index} shipsFrom .a-col-right'dan çekildi: ${shipsFrom}`);
                   }
                 }
               }
@@ -2263,25 +2293,18 @@ class PlaywrightService {
           console.log(`✅ [Playwright] Offer ${index} soldBy offer element'inden çekildi: ${soldBy} -> sellerName: ${sellerName}`);
         }
         
-        // Seller rating - "4.3 out of 5 stars" veya "Seller rating is 5 out of 5 stars"
+        // Seller rating - "Seller rating is 5 out of 5 stars"
         const ratingMatch = offerText.match(/(\d+(?:\.\d+)?)\s+out of\s+5\s+stars/i);
         if (ratingMatch) {
           sellerRating = parseFloat(ratingMatch[1]);
           console.log(`✅ [Playwright] Offer ${index} sellerRating offer element'inden çekildi: ${sellerRating}`);
         }
         
-        // Seller rating count - "(77 ratings)" veya "5,486 ratings" (parantezli/parantezsiz)
-        let ratingCountMatch = offerText.match(/\((\d{1,3}(?:,\d{3})*|\d+)\s*(?:ratings?|değerlendirme)\)/i);
+        // KRİTİK: Seller rating count - "(77 ratings)" veya "(1,234 ratings)" formatından çıkar
+        const ratingCountMatch = offerText.match(/\((\d{1,3}(?:,\d{3})*|\d+)\s*(?:ratings?|değerlendirme)\)/i);
         if (ratingCountMatch) {
           sellerRatingCount = ratingCountMatch[1].replace(/,/g, '');
-          console.log(`✅ [Playwright] Offer ${index} sellerRatingCount offer element'inden çekildi (parantezli): ${sellerRatingCount}`);
-        }
-        if (!sellerRatingCount) {
-          ratingCountMatch = offerText.match(/(\d{1,3}(?:,\d{3})*|\d+)\s*ratings?/i);
-          if (ratingCountMatch) {
-            sellerRatingCount = ratingCountMatch[1].replace(/,/g, '');
-            console.log(`✅ [Playwright] Offer ${index} sellerRatingCount offer element'inden çekildi (parantezsiz): ${sellerRatingCount}`);
-          }
+          console.log(`✅ [Playwright] Offer ${index} sellerRatingCount offer element'inden çekildi: ${sellerRatingCount}`);
         }
         
         // KRİTİK: Positive percentage - "100% positive" veya "98% positive" formatından çıkar
@@ -2300,25 +2323,15 @@ class PlaywrightService {
             try {
               const soldByElement = await page.$('#aod-offer-soldBy').catch(() => null);
               if (soldByElement) {
-                let soldByText = await soldByElement.textContent().then(t => t && t.trim()).catch(() => null);
-                const soldByMatch = soldByText && soldByText.match(/Sold by\s+([^\n\r]+?)(?:\s+Seller rating|$)/i);
-                if (soldByMatch) {
-                  soldBy = soldByMatch[1].trim();
-                  sellerName = soldBy;
-                  console.log(`✅ [Playwright] Offer ${index} soldBy sidebar'dan çekildi: ${soldBy} -> sellerName: ${sellerName}`);
-                }
-                if (!soldBy) {
-                  const soldByLink = await soldByElement.$('a.a-link-normal[href*="seller"], a[href*="aag"]').catch(() => null);
-                  if (soldByLink) {
-                    const linkText = await soldByLink.textContent().then(t => t && t.trim()).catch(() => null);
-                    if (linkText) {
-                      soldBy = linkText;
-                      sellerName = soldBy;
-                      console.log(`✅ [Playwright] Offer ${index} soldBy link text (See more sonrası): ${soldBy}`);
-                    }
-                  }
-                }
+                const soldByText = await soldByElement.textContent().then(t => t.trim()).catch(() => null);
                 if (soldByText) {
+                  // "Sold by vancasso Reactive Art Seller rating is 5 out of 5 stars..." formatından çıkar
+                  const soldByMatch = soldByText.match(/Sold by\s+([^\n\r]+?)(?:\s+Seller rating|$)/i);
+                  if (soldByMatch) {
+                    soldBy = soldByMatch[1].trim();
+                    sellerName = soldBy;
+                    console.log(`✅ [Playwright] Offer ${index} soldBy sidebar'dan çekildi: ${soldBy} -> sellerName: ${sellerName}`);
+                  }
                   
                   // Seller rating - "Seller rating is 5 out of 5 stars (77 ratings)"
                   if (!sellerRating) {
@@ -2349,49 +2362,40 @@ class PlaywrightService {
                 }
               }
               
-              // KRİTİK: Pinned offer için #aod-offer-seller-rating (See more sonrası açılan blok) rating bilgilerini çek
-              // Örnek metin: "(1079 ratings) 82% positive over last 12 months"
+              // KRİTİK: Pinned offer için #aod-offer-seller-rating elementinden rating bilgilerini çek
               if (!sellerRating || !sellerRatingCount || !positivePercentage) {
                 try {
-                  let ratingText = null;
-                  const ratingBlock = await page.$('#aod-offer-seller-rating').catch(() => null);
-                  if (ratingBlock) {
-                    ratingText = await ratingBlock.textContent().then(t => t && t.trim()).catch(() => null);
-                  }
-                  if (!ratingText) {
-                    const ratingSpan = await page.$('[id^="seller-rating-count-"]').catch(() => null);
-                    if (ratingSpan) {
-                      ratingText = await ratingSpan.textContent().then(t => t && t.trim()).catch(() => null);
-                    }
-                  }
-                  if (ratingText) {
-                    console.log(`🔍 [Playwright] Pinned offer rating text: ${ratingText.substring(0, 200)}`);
-                    if (!sellerRating) {
-                      const ratingMatch = ratingText.match(/(?:Seller rating is\s+)?(\d+(?:\.\d+)?)\s+out of\s+5\s+stars/i);
-                      if (ratingMatch) {
-                        sellerRating = parseFloat(ratingMatch[1]);
-                        console.log(`✅ [Playwright] Pinned offer sellerRating #aod-offer-seller-rating: ${sellerRating}`);
-                      }
-                    }
-                    if (!sellerRatingCount) {
-                      let ratingCountMatch = ratingText.match(/\((\d{1,3}(?:,\d{3})*|\d+)\s*(?:ratings?|değerlendirme)\)/i);
-                      if (ratingCountMatch) {
-                        sellerRatingCount = ratingCountMatch[1].replace(/,/g, '');
-                        console.log(`✅ [Playwright] Pinned offer sellerRatingCount (parantezli): ${sellerRatingCount}`);
-                      }
-                      if (!sellerRatingCount) {
-                        ratingCountMatch = ratingText.match(/(\d{1,3}(?:,\d{3})*|\d+)\s*ratings?/i);
-                        if (ratingCountMatch) {
-                          sellerRatingCount = ratingCountMatch[1].replace(/,/g, '');
-                          console.log(`✅ [Playwright] Pinned offer sellerRatingCount (parantezsiz): ${sellerRatingCount}`);
+                  const ratingElement = await page.$('#aod-offer-seller-rating, span#seller-rating-count-0').catch(() => null);
+                  if (ratingElement) {
+                    const ratingText = await ratingElement.textContent().then(t => t.trim()).catch(() => null);
+                    if (ratingText) {
+                      console.log(`🔍 [Playwright] Pinned offer rating text: ${ratingText.substring(0, 200)}`);
+                      
+                      // Seller rating
+                      if (!sellerRating) {
+                        const ratingMatch = ratingText.match(/(?:Seller rating is\s+)?(\d+(?:\.\d+)?)\s+out of\s+5\s+stars/i);
+                        if (ratingMatch) {
+                          sellerRating = parseFloat(ratingMatch[1]);
+                          console.log(`✅ [Playwright] Pinned offer sellerRating #aod-offer-seller-rating'den çekildi: ${sellerRating}`);
                         }
                       }
-                    }
-                    if (!positivePercentage) {
-                      const positiveMatch = ratingText.match(/(\d+(?:\.\d+)?)\s*%\s*positive/i);
-                      if (positiveMatch) {
-                        positivePercentage = parseFloat(positiveMatch[1]);
-                        console.log(`✅ [Playwright] Pinned offer positivePercentage: ${positivePercentage}%`);
+                      
+                      // Seller rating count
+                      if (!sellerRatingCount) {
+                        const ratingCountMatch = ratingText.match(/\((\d{1,3}(?:,\d{3})*|\d+)\s*(?:ratings?|değerlendirme)\)/i);
+                        if (ratingCountMatch) {
+                          sellerRatingCount = ratingCountMatch[1].replace(/,/g, '');
+                          console.log(`✅ [Playwright] Pinned offer sellerRatingCount #aod-offer-seller-rating'den çekildi: ${sellerRatingCount}`);
+                        }
+                      }
+                      
+                      // Positive percentage
+                      if (!positivePercentage) {
+                        const positiveMatch = ratingText.match(/(\d+(?:\.\d+)?)\s*%\s*positive/i);
+                        if (positiveMatch) {
+                          positivePercentage = parseFloat(positiveMatch[1]);
+                          console.log(`✅ [Playwright] Pinned offer positivePercentage #aod-offer-seller-rating'den çekildi: ${positivePercentage}%`);
+                        }
                       }
                     }
                   }
@@ -2524,14 +2528,10 @@ class PlaywrightService {
                   const ratingMatch = t.match(/(\d+(?:\.\d+)?)\s+out of\s+5\s+stars/i);
                   if (ratingMatch) sellerRating = parseFloat(ratingMatch[1]);
                 }
-                // KRİTİK: Seller rating count (parantezli veya parantezsiz)
+                // KRİTİK: Seller rating count
                 if (!sellerRatingCount) {
-                  let ratingCountMatch = t.match(/\((\d{1,3}(?:,\d{3})*|\d+)\s*(?:ratings?|değerlendirme)\)/i);
+                  const ratingCountMatch = t.match(/\((\d{1,3}(?:,\d{3})*|\d+)\s*(?:ratings?|değerlendirme)\)/i);
                   if (ratingCountMatch) sellerRatingCount = ratingCountMatch[1].replace(/,/g, '');
-                  if (!sellerRatingCount) {
-                    ratingCountMatch = t.match(/(\d{1,3}(?:,\d{3})*|\d+)\s*ratings?/i);
-                    if (ratingCountMatch) sellerRatingCount = ratingCountMatch[1].replace(/,/g, '');
-                  }
                 }
                 // KRİTİK: Positive percentage
                 if (!positivePercentage) {
@@ -2574,19 +2574,12 @@ class PlaywrightService {
                     }
                   }
                   
-                  // KRİTİK: Seller rating count - "(33 ratings)" veya "5,486 ratings" (parantezli/parantezsiz)
+                  // KRİTİK: Seller rating count - "(33 ratings)" veya "(1 rating)" formatından çıkar
                   if (!sellerRatingCount) {
-                    let ratingCountMatch = ratingText.match(/\((\d{1,3}(?:,\d{3})*|\d+)\s*(?:ratings?|değerlendirme)\)/i);
+                    const ratingCountMatch = ratingText.match(/\((\d{1,3}(?:,\d{3})*|\d+)\s*(?:ratings?|değerlendirme)\)/i);
                     if (ratingCountMatch) {
                       sellerRatingCount = ratingCountMatch[1].replace(/,/g, '');
-                      console.log(`✅ [Playwright] Offer ${index} sellerRatingCount #aod-offer-seller-rating'den: ${sellerRatingCount}`);
-                    }
-                    if (!sellerRatingCount) {
-                      ratingCountMatch = ratingText.match(/(\d{1,3}(?:,\d{3})*|\d+)\s*ratings?/i);
-                      if (ratingCountMatch) {
-                        sellerRatingCount = ratingCountMatch[1].replace(/,/g, '');
-                        console.log(`✅ [Playwright] Offer ${index} sellerRatingCount #aod-offer-seller-rating (parantezsiz): ${sellerRatingCount}`);
-                      }
+                      console.log(`✅ [Playwright] Offer ${index} sellerRatingCount #aod-offer-seller-rating'den çekildi: ${sellerRatingCount}`);
                     }
                   }
                   
@@ -2603,34 +2596,6 @@ class PlaywrightService {
             } catch (ratingError) {
               console.warn(`⚠️ [Playwright] Offer ${index} rating bilgileri çekilirken hata: ${ratingError.message}`);
             }
-          }
-          
-          // KRİTİK: Pinned offer için son fallback - #aod-container tüm metninden rating parse et
-          if (isPinnedOffer && (!sellerRating || !sellerRatingCount) && index === 0) {
-            try {
-              const aodContainer = await page.$('#aod-container, #aod-offer-list, .aod-information-block').catch(() => null);
-              if (aodContainer) {
-                const fullText = await aodContainer.textContent().then(t => t && t.trim()).catch(() => null);
-                if (fullText && fullText.length > 50) {
-                  if (!sellerRating) {
-                    const m = fullText.match(/(?:Seller rating is\s+)?(\d+(?:\.\d+)?)\s+out of\s+5\s+stars/i);
-                    if (m) { sellerRating = parseFloat(m[1]); console.log(`✅ [Playwright] Pinned offer sellerRating aod-container fallback: ${sellerRating}`); }
-                  }
-                  if (!sellerRatingCount) {
-                    let m = fullText.match(/\((\d{1,3}(?:,\d{3})*|\d+)\s*(?:ratings?|değerlendirme)\)/i);
-                    if (m) { sellerRatingCount = m[1].replace(/,/g, ''); console.log(`✅ [Playwright] Pinned offer sellerRatingCount aod-container fallback: ${sellerRatingCount}`); }
-                    if (!sellerRatingCount) {
-                      m = fullText.match(/(\d{1,3}(?:,\d{3})*|\d+)\s*ratings?/i);
-                      if (m) { sellerRatingCount = m[1].replace(/,/g, ''); console.log(`✅ [Playwright] Pinned offer sellerRatingCount aod-container (parantezsiz): ${sellerRatingCount}`); }
-                    }
-                  }
-                  if (!positivePercentage) {
-                    const m = fullText.match(/(\d+(?:\.\d+)?)\s*%\s*positive/i);
-                    if (m) { positivePercentage = parseFloat(m[1]); console.log(`✅ [Playwright] Pinned offer positivePercentage aod-container fallback: ${positivePercentage}%`); }
-                  }
-                }
-              }
-            } catch (e) { /* ignore */ }
           }
         }
       } catch (e) {
@@ -2679,30 +2644,29 @@ class PlaywrightService {
           // Diğer offer'lar için: offer içinde delivery bilgileri
           if (isPinnedOffer) {
             try {
-              // Standard delivery: #mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE_LARGE span (See more sonrası)
-              let standardDeliveryElement = await page.$('#mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE_LARGE > span').catch(() => null);
-              if (!standardDeliveryElement) standardDeliveryElement = await page.$('#mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE_LARGE span').catch(() => null);
+              // Standard delivery: #mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE_LARGE > span
+              const standardDeliveryElement = await page.$('#mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE_LARGE > span').catch(() => null);
               if (standardDeliveryElement) {
-                let standardDeliveryText = await standardDeliveryElement.textContent().then(t => t && t.trim()).catch(() => null);
+                const standardDeliveryText = await standardDeliveryElement.textContent().then(t => t.trim()).catch(() => null);
                 if (standardDeliveryText) {
+                  // "$58.34 delivery Monday, January 26" formatından çıkar
                   const shippingMatch = standardDeliveryText.match(/[\$£€]?\s*([\d,]+\.?\d*)\s+delivery/i);
                   if (shippingMatch) {
                     shippingPrice = parseFloat(shippingMatch[1].replace(/,/g, ''));
                   }
+                  
+                  // Delivery date çıkar
                   const dateMatch = standardDeliveryText.match(/((?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),?\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2})/i);
-                  if (dateMatch) deliveryDate = dateMatch[1].trim();
-                  console.log(`✅ [Playwright] Offer ${index} standard delivery sidebar'dan çekildi: shippingPrice: ${shippingPrice}, deliveryDate: ${deliveryDate}`);
-                }
-                if (!shippingPrice || !deliveryDate) {
-                  const deliveryPrice = await standardDeliveryElement.getAttribute('data-csa-c-delivery-price').catch(() => null);
-                  const deliveryTime = await standardDeliveryElement.getAttribute('data-csa-c-delivery-time').catch(() => null);
-                  if (deliveryPrice && /[\d.]+/.test(deliveryPrice)) shippingPrice = parseFloat(deliveryPrice.replace(/[^0-9.]/g, ''));
-                  if (deliveryTime) deliveryDate = deliveryTime;
+                  if (dateMatch) {
+                    deliveryDate = dateMatch[1].trim();
+                  }
+                  
+                  console.log(`✅ [Playwright] Offer ${index} standard delivery sidebar'dan çekildi: ${standardDeliveryText} -> shippingPrice: ${shippingPrice}, deliveryDate: ${deliveryDate}`);
                 }
               }
-              // Express delivery: #mir-layout-DELIVERY_BLOCK-slot-SECONDARY_DELIVERY_MESSAGE_LARGE span
-              let expressDeliveryElement = await page.$('#mir-layout-DELIVERY_BLOCK-slot-SECONDARY_DELIVERY_MESSAGE_LARGE > span').catch(() => null);
-              if (!expressDeliveryElement) expressDeliveryElement = await page.$('#mir-layout-DELIVERY_BLOCK-slot-SECONDARY_DELIVERY_MESSAGE_LARGE span').catch(() => null);
+              
+              // Express delivery: #mir-layout-DELIVERY_BLOCK-slot-SECONDARY_DELIVERY_MESSAGE_LARGE > span
+              const expressDeliveryElement = await page.$('#mir-layout-DELIVERY_BLOCK-slot-SECONDARY_DELIVERY_MESSAGE_LARGE > span').catch(() => null);
               if (expressDeliveryElement) {
                 const expressDeliveryText = await expressDeliveryElement.textContent().then(t => t.trim()).catch(() => null);
                 if (expressDeliveryText) {
@@ -2822,13 +2786,15 @@ class PlaywrightService {
     let page = null;
     const usePool = !opts.sharedPage;
     try {
-      console.log(`🎭 [Seller Playwright] Seller: ${asin} from ${sourceMarketplace} (${usePool ? 'pool' : 'shared'})`);
+      console.log(`🎭 [Seller Playwright] Seller: ${asin} from ${sourceMarketplace} target=${targetCountry || 'default'} (${usePool ? 'pool' : 'shared'})`);
       if (opts.sharedPage) {
         page = opts.sharedPage;
       } else {
         const key = this.getContextKey(sourceMarketplace, targetCountry);
+        console.log(`📦 [Seller Playwright] Page pool alınıyor: ${key}`);
         const pool = await this.getPagePool(sourceMarketplace, targetCountry);
         page = this.getNextPage(pool, key);
+        console.log(`📦 [Seller Playwright] Sayfa alındı, AOD'a gidiliyor`);
       }
       // Marketplace domain mapping (pool/shared sayfa kullanılıyor — browser/context pool’da)
       const marketplaceDomain = {
@@ -3335,24 +3301,20 @@ class PlaywrightService {
         console.warn(`⚠️ [Playwright] Toplam satıcı sayısı bulunamadı: ${e.message}`);
       }
       
-      // KRİTİK: Pinned offer için "See more" linkine tıkla (Ships from, Sold by, Rating burada açılıyor)
+      // KRİTİK: Pinned offer için "See more" linkine tıkla (eğer varsa)
       try {
         const seeMoreLink = await page.$('#aod-pinned-offer-show-more-link').catch(() => null);
         if (seeMoreLink) {
-          console.log(`🔗 [Playwright] "See more" linki bulundu, tıklanıyor (rating/ships/soldBy açılacak)...`);
+          console.log(`🔗 [Playwright] "See more" linki bulundu, tıklanıyor...`);
           try {
             await seeMoreLink.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {});
             await this.safeWait(page, 500);
             await seeMoreLink.click({ timeout: 10000 });
             console.log(`✅ [Playwright] "See more" linkine tıklandı`);
-            // KRİTİK: #aod-offer-seller-rating / seller-rating-count-* görünene kadar bekle (rating bu blokta)
-            await page.waitForSelector('#aod-offer-seller-rating, [id^="seller-rating-count-"]', { timeout: 10000, state: 'visible' }).catch(() => null);
-            await this.safeWait(page, 2500); // Ek içeriğin render olması için
+            await this.safeWait(page, 2000); // Sidebar içeriğinin yüklenmesi için bekle
           } catch (clickError) {
             console.warn(`⚠️ [Playwright] "See more" linkine tıklanamadı: ${clickError.message}`);
           }
-        } else {
-          await this.safeWait(page, 1000);
         }
       } catch (e) {
         console.warn(`⚠️ [Playwright] "See more" linki kontrol edilemedi: ${e.message}`);
@@ -3520,16 +3482,13 @@ class PlaywrightService {
       };
 
     } catch (error) {
-      const errMsg = (error && (error.message || (typeof error.toString === 'function' && error.toString()))) || 'Unknown error';
-      const isTimeout = /timeout|ETIMEDOUT|deadline/i.test(errMsg);
-      const isEAGAIN = error && (error.isEAGAIN || /EAGAIN|Resource temporarily unavailable|spawn|Failed to launch/i.test(errMsg));
-      console.error(`❌ [Playwright] Seller bilgileri çekilirken hata:`, errMsg);
-      if (error && error.stack) console.error(`❌ Error stack:`, error.stack.substring(0, 500));
+      console.error(`❌ [Playwright] Seller bilgileri çekilirken hata:`, error.message);
+      console.error(`❌ Error stack:`, error.stack);
       return {
         success: false,
         data: null,
-        error: errMsg,
-        status: isEAGAIN ? 503 : (isTimeout ? 504 : 500)
+        error: error.message,
+        status: 500
       };
     } finally {
       // Pool/shared kullanıldığında sayfa ve browser kapatılmaz — tekrar kullanılır
