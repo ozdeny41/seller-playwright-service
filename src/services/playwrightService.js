@@ -11,6 +11,45 @@ class PlaywrightService {
     this.pagePools = new Map();
     this.pagePoolIndex = new Map();
     this.pagePoolSize = 10;
+    this.requestCount = 0;
+    this.RECYCLE_AFTER_REQUESTS = 50;
+  }
+
+  async closeBrowserForRecycle() {
+    console.log('🔄 [Seller Playwright] Bellek önleme: browser ve context\'ler kapatılıyor...');
+    try {
+      for (const [key, ctx] of this.contexts) {
+        try {
+          if (ctx && typeof ctx.close === 'function') await ctx.close();
+        } catch (e) {
+          console.warn(`⚠️ [Seller Playwright] Context close hatası (${key}):`, e.message);
+        }
+      }
+      this.contexts.clear();
+      this.contextSetupStatus.clear();
+      this.pagePools.clear();
+      this.pagePoolIndex.clear();
+      if (this.browser) {
+        try {
+          await this.browser.close();
+        } catch (e) {
+          console.warn('⚠️ [Seller Playwright] Browser close hatası:', e.message);
+        }
+        this.browser = null;
+      }
+      this.browserLaunchPromise = null;
+      console.log('✅ [Seller Playwright] Browser recycle tamamlandı');
+    } catch (e) {
+      console.error('❌ [Seller Playwright] closeBrowserForRecycle hatası:', e.message);
+    }
+  }
+
+  async recordRequestAndMaybeRecycle() {
+    this.requestCount++;
+    if (this.requestCount >= this.RECYCLE_AFTER_REQUESTS) {
+      await this.closeBrowserForRecycle();
+      this.requestCount = 0;
+    }
   }
 
   getContextKey(sourceMarketplace, targetCountryCode) {

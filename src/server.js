@@ -71,6 +71,16 @@ const runBrowserCheck = () => {
   })();
 };
 
+// KRİTİK: Process çökmemesi için global hata yakalama (uzun süreli çalışmada OOM/uncaught hatalar)
+process.on('uncaughtException', (err) => {
+  console.error('❌ [Seller Playwright] uncaughtException:', err.message);
+  console.error(err.stack);
+  process.exit(1);
+});
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('❌ [Seller Playwright] unhandledRejection:', reason);
+});
+
 runBrowserCheck();
 global.__browserInstallationPromise = browserInstallationPromise || Promise.resolve();
 global.__browserInstallationComplete = browserInstallationComplete;
