@@ -3,14 +3,14 @@ const { chromium } = require('playwright');
 
 class PlaywrightService {
   constructor() {
-    console.log('✅ [Seller Playwright] Initializing (20 sekme, browser bir kere — vixify-playwright-service-batch mantığı)...');
+    console.log('✅ [Seller Playwright] Initializing (10 sekme, browser bir kere — vixify-playwright-service-batch mantığı)...');
     this.browser = null;
     this.browserLaunchPromise = null;
     this.contexts = new Map();
     this.contextSetupStatus = new Map();
     this.pagePools = new Map();
     this.pagePoolIndex = new Map();
-    this.pagePoolSize = 20;
+    this.pagePoolSize = 10;
   }
 
   getContextKey(sourceMarketplace, targetCountryCode) {
@@ -2120,46 +2120,32 @@ class PlaywrightService {
         
         // Eğer bulunamadıysa, sidebar'dan price çek
         if (!price && !priceText) {
-          // KRİTİK: Sidebar'dan price çek
-          // Pinned offer için: #aod-price-0
-          // Diğer offer'lar için: #aod-price-${index}
-          if (isPinnedOffer) {
+          // KRİTİK: Tıklanan satırın fiyatı sidebar'da "seçili offer" alanında (#aod-price-0) gösterilir.
+          // Pinned için #aod-price-0; listede tıklanan satır için de sidebar güncellenir, #aod-price-0 seçili satırın fiyatını gösterir.
+          const sidebarSelectors = isPinnedOffer
+            ? ['#aod-price-0']
+            : ['#aod-price-0', `#aod-price-${index}`]; // Önce seçili (0), yoksa index
+          for (const sel of sidebarSelectors) {
             try {
-              const priceElement = await page.$('#aod-price-0 span[aria-hidden="true"], #aod-price-0 .a-offscreen').catch(() => null);
+              const priceElement = await page.$(`${sel} span[aria-hidden="true"], ${sel} .a-offscreen`).catch(() => null);
               if (priceElement) {
                 priceText = await priceElement.textContent().then(t => t.trim()).catch(() => null);
                 if (priceText) {
-                  // Fiyatı parse et - "$132 . 99" -> 132.99 (boşlukları temizle)
                   const cleanedPriceText = priceText.replace(/\s+/g, '');
                   const priceMatch = cleanedPriceText.match(/[\$£€]?([\d,]+\.?\d*)/);
                   if (priceMatch) {
                     price = parseFloat(priceMatch[1].replace(/,/g, ''));
-                    console.log(`✅ [Playwright] Offer ${index} price sidebar'dan çekildi: ${priceText} -> ${price}`);
+                    console.log(`✅ [Playwright] Offer ${index} price sidebar'dan çekildi (${sel}): ${priceText} -> ${price}`);
+                    break;
                   }
                 }
               }
             } catch (e) {
-              console.warn(`⚠️ [Playwright] Offer ${index} price sidebar'dan çekilemedi: ${e.message}`);
+              // Sonraki selector'ı dene
             }
-          } else {
-            // Diğer offer'lar için: #aod-price-${index}
-            try {
-              const priceElement = await page.$(`#aod-price-${index} span[aria-hidden="true"], #aod-price-${index} .a-offscreen`).catch(() => null);
-              if (priceElement) {
-                priceText = await priceElement.textContent().then(t => t.trim()).catch(() => null);
-                if (priceText) {
-                  // Fiyatı parse et - "$132 . 99" -> 132.99 (boşlukları temizle)
-                  const cleanedPriceText = priceText.replace(/\s+/g, '');
-                  const priceMatch = cleanedPriceText.match(/[\$£€]?([\d,]+\.?\d*)/);
-                  if (priceMatch) {
-                    price = parseFloat(priceMatch[1].replace(/,/g, ''));
-                    console.log(`✅ [Playwright] Offer ${index} price sidebar'dan çekildi: ${priceText} -> ${price}`);
-                  }
-                }
-              }
-            } catch (e) {
-              console.warn(`⚠️ [Playwright] Offer ${index} price sidebar'dan çekilemedi: ${e.message}`);
-            }
+          }
+          if (!price && !priceText) {
+            console.warn(`⚠️ [Playwright] Offer ${index} price sidebar'dan çekilemedi (${sidebarSelectors.join(', ')})`);
           }
         }
         
@@ -2767,7 +2753,8 @@ class PlaywrightService {
         // KRİTİK: Gönderim fiyatları - Ayrı field'lar olarak
         shippingPrice: shippingPrice, // Standard shipping price (geriye dönük uyumluluk)
         standardShippingPrice: shippingPrice, // Standard shipping price
-        expressShippingPrice: null // Express shipping price (henüz çekilmiyor, ileride eklenebilir)
+        expressShippingPrice: null, // Express shipping price (henüz çekilmiyor, ileride eklenebilir)
+        isBuybox: !!isPinnedOffer // Pinned offer = Buybox (modal'da "Buybox" etiketi için)
       };
     } catch (e) {
       console.error(`❌ [Playwright] Seller data extraction hatası: ${e.message}`);
@@ -3437,29 +3424,24 @@ class PlaywrightService {
         uniqueSellers = []; // Hata durumunda boş array
       }
       
-      // uniqueSellers varsa onu kullan, yoksa sellers'ı kullan
-      // KRİTİK: Modal'da tüm satıcılar/offer'lar gösterilecek (unique'e indirgeme yapma)
+      // KRİTİK: Her TEKLİF bir satır — aynı satıcı 2 farklı fiyatla listeliyorsa 2 satır, 1 fiyatla 1 satır.
+      // Aynı satıcı + aynı fiyat çift kayıt varsa tek satırda birleştir (çift görünmeyi önle).
       const preferAllOffers = true;
-      const finalSellers = preferAllOffers ? sellers : (uniqueSellers.length > 0 ? uniqueSellers : sellers);
-      let finalTotalSellers = preferAllOffers ? sellers.length : (uniqueSellers.length > 0 ? uniqueSellers.length : (totalSellers || sellers.length));
-      
-      // KRİTİK: Buybox'ı seller listesinin başına ekle (eğer varsa ve listede yoksa)
-      if (buyboxData) {
-        // Buybox'ın listede olup olmadığını kontrol et
-        const buyboxExists = finalSellers.some(s => {
-          const sName = (s.sellerName || s.soldBy || '').toLowerCase().trim();
-          const bName = (buyboxData.sellerName || buyboxData.soldBy || '').toLowerCase().trim();
-          return sName === bName && s.isBuybox === true;
-        });
-        
-        if (!buyboxExists) {
-          // Buybox'ı listenin başına ekle
-          finalSellers.unshift(buyboxData);
-          console.log(`✅ [Playwright] Buybox seller listesinin başına eklendi`);
-        } else {
-          console.log(`ℹ️ [Playwright] Buybox zaten listede mevcut`);
+      let finalSellers = preferAllOffers ? sellers : (uniqueSellers.length > 0 ? uniqueSellers : sellers);
+      const seenOfferKey = new Set();
+      finalSellers = finalSellers.filter(s => {
+        const nameNorm = (s.sellerName || s.soldBy || '').toLowerCase().trim().replace(/\s+/g, ' ');
+        const nameKey = nameNorm && nameNorm.length >= 2 ? nameNorm : `idx-${s.index ?? seenOfferKey.size}`;
+        const priceVal = s.price != null && !Number.isNaN(Number(s.price)) ? Number(s.price).toFixed(2) : '';
+        const key = `${nameKey}|${priceVal}`;
+        if (seenOfferKey.has(key)) {
+          console.log(`🔍 [Playwright] Çift teklif atlandı (aynı satıcı + aynı fiyat): ${s.sellerName || s.soldBy} @ ${priceVal}`);
+          return false;
         }
-      }
+        seenOfferKey.add(key);
+        return true;
+      });
+      let finalTotalSellers = finalSellers.length;
       
       // KRİTİK: Total seller sayısını, döndürülen listenin uzunluğuna göre düzelt
       if (!finalTotalSellers || finalTotalSellers < finalSellers.length) {
@@ -3472,10 +3454,10 @@ class PlaywrightService {
           asin: asin,
           sourceMarketplace: sourceMarketplace,
           targetCountry: targetCountry,
-          totalSellers: finalTotalSellers, // Unique seller sayısı
-          sellers: finalSellers, // Unique seller'lar (buybox dahil)
-          marketplace: 'source', // Kaynak mağaza
-          buybox: buyboxData || null // Buybox bilgileri (ayrıca döndür)
+          totalSellers: finalTotalSellers,
+          sellers: finalSellers,
+          marketplace: 'source',
+          buybox: finalSellers.find(s => s.isBuybox) || null
         },
         error: null,
         status: 200
@@ -3496,7 +3478,7 @@ class PlaywrightService {
   }
 
   /**
-   * Get seller information for multiple ASINs in a single browser session (20 sekme paralel — vixify-playwright-service-batch mantığı).
+   * Get seller information for multiple ASINs in a single browser session (10 sekme paralel — vixify-playwright-service-batch mantığı).
    * Ülke + para birimi seçimi 1 kez yapılır, sonra ASIN değiştirerek AOD sayfaları gezilir.
    * @param {string[]} asins
    * @param {string} sourceMarketplace
@@ -3513,16 +3495,16 @@ class PlaywrightService {
         return { success: false, data: null, error: 'ASIN list is required', status: 400 };
       }
 
-      console.log(`🎭 [Seller Playwright] Batch: ${asinList.length} ASIN, 20 sekme paralel (browser bir kere)`);
+      console.log(`🎭 [Seller Playwright] Batch: ${asinList.length} ASIN, 10 sekme paralel (browser bir kere)`);
 
-      // 1) Browser bir kere, 2) Context + ülke bir kere, 3) 20 sekme pool
+      // 1) Browser bir kere, 2) Context + ülke bir kere, 3) 10 sekme pool
       await this.getBrowser();
       await this.getOrCreateContext(sourceMarketplace, targetCountry);
       const pages = await this.getPagePool(sourceMarketplace, targetCountry);
       const key = this.getContextKey(sourceMarketplace, targetCountry);
 
       const items = [];
-      const batchSize = 20;
+      const batchSize = 10;
 
       for (let i = 0; i < asinList.length; i += batchSize) {
         const batch = asinList.slice(i, i + batchSize);
