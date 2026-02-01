@@ -3431,9 +3431,10 @@ class PlaywrightService {
       const seenOfferKey = new Set();
       const priceValFor = (s) => (s.price != null && !Number.isNaN(Number(s.price)) ? Number(s.price).toFixed(2) : 'noprice');
       const canonicalSellerName = (name) => {
-        const n = (name || '').toLowerCase().trim().replace(/\s+/g, ' ');
+        const raw = (name || '').normalize('NFD').replace(/\u0300-\u036f/g, ''); // diakritik kaldır (à -> a)
+        const n = raw.toLowerCase().trim().replace(/\s+/g, ' ');
         if (!n || n.length < 2) return n;
-        if (n === 'amazon' || n === 'amazon.com' || n.startsWith('amazon.') || n.includes('amazon.')) return 'amazon';
+        if (n.includes('amazon')) return 'amazon'; // Amazon, Amazon.com, Amazon EU S.à r.L. vb. tek satıcı
         return n;
       };
       const nameKeyFor = (s, fallback) => {
