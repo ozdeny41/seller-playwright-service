@@ -3306,10 +3306,24 @@ class PlaywrightService {
       } catch (e) {
         console.warn(`⚠️ [Playwright] "See more" linki kontrol edilemedi: ${e.message}`);
       }
-      
-      // KRİTİK: Scroll KALDIRILDI — #aod-filter-offer-count-string ("4 other options" = 5 satıcı) ile sınırlı
-      // Gereksiz scroll 92+ satıcı yüklüyordu; sadece sayfa bildirdiği kadar işle
-      
+
+      // KRİTİK: totalSellers kadar satıcı görmek için offer listesini scroll et (lazy-load ile sadece görünenler DOM'da)
+      const targetOther = totalSellers > 0 ? totalSellers - 1 : 20;
+      for (let scrollRound = 0; scrollRound < 8; scrollRound++) {
+        const currentCount = await page.$$('#aod-offer-list > div.a-section').then(els => els.length).catch(() => 0)
+          || await page.$$('#aod-offer-list > div').then(els => els.length).catch(() => 0);
+        if (currentCount >= targetOther) break;
+        try {
+          await page.evaluate(() => {
+            const list = document.querySelector('#aod-offer-list');
+            if (list) list.scrollTop = list.scrollHeight;
+            const container = document.querySelector('#aod-container, #all-offers-display');
+            if (container) container.scrollTop = container.scrollHeight;
+          });
+          await this.safeWait(page, 800);
+        } catch (e) { break; }
+      }
+
       // Tüm seller offer'larını çek - KRİTİK: Sidebar'dan tüm bilgileri çek
       const sellers = [];
       let uniqueSellers = [];
