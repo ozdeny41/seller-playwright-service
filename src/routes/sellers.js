@@ -155,9 +155,6 @@ router.post('/', async (req, res, next) => {
       itemsCount: result.data?.items?.length || 0,
       error: result.error || null
     });
-    if (result.success && typeof playwrightService.recordRequestAndMaybeRecycle === 'function') {
-      playwrightService.recordRequestAndMaybeRecycle().catch(() => {});
-    }
     if (result.success) {
       res.json({ ok: true, data: result.data });
     } else {
@@ -218,9 +215,6 @@ router.get('/:asin', async (req, res, next) => {
     if (!result || typeof result !== 'object') {
       console.error(`❌ [Playwright Service] Servis yanıtı geçersiz (GET, result: ${typeof result})`);
       return res.status(500).json({ ok: false, error: 'No response from seller service' });
-    }
-    if (result.success && typeof playwrightService.recordRequestAndMaybeRecycle === 'function') {
-      playwrightService.recordRequestAndMaybeRecycle().catch(() => {});
     }
     if (result.success) {
       res.json({ ok: true, data: result.data });
