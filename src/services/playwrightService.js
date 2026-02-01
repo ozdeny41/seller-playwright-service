@@ -3365,6 +3365,8 @@ class PlaywrightService {
         if (bySection > 0) return bySection;
         const byDiv = await page.$$('#aod-offer-list > div').then(els => els.length).catch(() => 0);
         if (byDiv > 0) return byDiv;
+        const byId = await page.$$('#aod-offer-list [id^="aod-offer-"]').then(els => els.length).catch(() => 0);
+        if (byId > 0) return byId;
         const byAny = await page.$$('#aod-offer-list > div[id^="aod-offer"], #aod-offer-list > *').then(els => els.length).catch(() => 0);
         return byAny;
       };
@@ -3386,6 +3388,29 @@ class PlaywrightService {
             }
           });
           await this.safeWait(page, 1800);
+        } catch (e) { break; }
+      }
+      // KRİTİK: Artan scroll — lazy-load için küçük adımlarla scroll (bazı sayfalarda sadece tam scroll yetmiyor)
+      let prevCount = 0;
+      let noIncreaseRounds = 0;
+      for (let step = 0; step < 20 && noIncreaseRounds < 6; step++) {
+        const count = await getOfferCount();
+        if (count >= targetOther) break;
+        if (count <= prevCount) noIncreaseRounds++; else noIncreaseRounds = 0;
+        prevCount = count;
+        try {
+          await page.evaluate(() => {
+            const list = document.querySelector('#aod-offer-list');
+            const container = document.querySelector('#aod-container, #all-offers-display');
+            [list, container].filter(Boolean).forEach(el => {
+              if (el.scrollHeight > el.clientHeight) {
+                el.scrollTop = Math.min(el.scrollTop + 400, el.scrollHeight);
+              }
+            });
+            const lastChild = list ? list.lastElementChild : null;
+            if (lastChild) lastChild.scrollIntoView({ block: 'end', behavior: 'auto' });
+          });
+          await this.safeWait(page, 2500);
         } catch (e) { break; }
       }
       await this.safeWait(page, 1500);
@@ -3448,7 +3473,11 @@ class PlaywrightService {
           let list = await page.$$('#aod-offer-list > div.a-section').catch(() => []);
           if (list.length === 0) list = await page.$$('#aod-offer-list > div').catch(() => []);
           if (list.length === 0) list = await page.$$('#aod-offer-list div.a-section').catch(() => []);
-          if (list.length === 0) list = await page.$$('#aod-offer-list > *').catch(() => []);
+          if (list.length < maxOther) {
+            const byId = await page.$$('#aod-offer-list [id^="aod-offer-"]').catch(() => []);
+            if (byId.length > list.length) list = byId;
+          }
+          if (list.length === 0) list = await page.$$('#aod-offer-list > div[id^="aod-offer"], #aod-offer-list > *').catch(() => []);
           return list;
         };
         while (processedCount < maxOther) {
@@ -3456,8 +3485,14 @@ class PlaywrightService {
           const toProcess = listNow.slice(processedCount, maxOther);
           if (toProcess.length === 0) {
             noProgressCount++;
-            if (noProgressCount > 4 || processedCount === 0) break;
+            if (noProgressCount > 8 || processedCount === 0) break;
             await scrollAndWait();
+            await page.evaluate(() => {
+              const list = document.querySelector('#aod-offer-list');
+              const last = list ? list.lastElementChild : null;
+              if (last) last.scrollIntoView({ block: 'end', behavior: 'auto' });
+            }).catch(() => {});
+            await this.safeWait(page, 2500);
             continue;
           }
           noProgressCount = 0;
