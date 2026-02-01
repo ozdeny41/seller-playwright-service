@@ -2157,34 +2157,49 @@ class PlaywrightService {
           console.log(`✅ [Playwright] Offer ${index} price offer element'inden çekildi: ${priceText} -> ${price}`);
         }
         
-        // Eğer bulunamadıysa, sidebar'dan price çek
+        // Eğer bulunamadıysa: liste satırından #aod-price-{index} veya sidebar'dan çek
         if (!price && !priceText) {
-          // KRİTİK: Tıklanan satırın fiyatı sidebar'da "seçili offer" alanında (#aod-price-0) gösterilir.
-          // Pinned için #aod-price-0; listede tıklanan satır için de sidebar güncellenir, #aod-price-0 seçili satırın fiyatını gösterir.
-          const sidebarSelectors = isPinnedOffer
-            ? ['#aod-price-0']
-            : ['#aod-price-0', `#aod-price-${index}`]; // Önce seçili (0), yoksa index
-          for (const sel of sidebarSelectors) {
+          if (!isPinnedOffer) {
             try {
-              const priceElement = await page.$(`${sel} span[aria-hidden="true"], ${sel} .a-offscreen`).catch(() => null);
-              if (priceElement) {
-                priceText = await priceElement.textContent().then(t => t.trim()).catch(() => null);
-                if (priceText) {
-                  const cleanedPriceText = priceText.replace(/\s+/g, '');
-                  const priceMatch = cleanedPriceText.match(/[\$£€]?([\d,]+\.?\d*)/);
+              const rowPriceEl = await offerElement.$(`#aod-price-${index}`).catch(() => null);
+              if (rowPriceEl) {
+                const raw = await rowPriceEl.textContent().then(t => t.trim()).catch(() => null);
+                if (raw) {
+                  const cleaned = raw.replace(/\s+/g, '');
+                  const priceMatch = cleaned.match(/[\$£€]?([\d,]+\.?\d*)/);
                   if (priceMatch) {
                     price = parseFloat(priceMatch[1].replace(/,/g, ''));
-                    console.log(`✅ [Playwright] Offer ${index} price sidebar'dan çekildi (${sel}): ${priceText} -> ${price}`);
-                    break;
+                    priceText = raw;
+                    console.log(`✅ [Playwright] Offer ${index} price satır #aod-price-${index} çekildi: ${price}`);
                   }
                 }
               }
-            } catch (e) {
-              // Sonraki selector'ı dene
+            } catch (e) { /* row price skip */ }
+          }
+          if (!price && !priceText) {
+            const sidebarSelectors = isPinnedOffer
+              ? ['#aod-price-0']
+              : ['#aod-price-0', `#aod-price-${index}`];
+            for (const sel of sidebarSelectors) {
+              try {
+                const priceElement = await page.$(`${sel} span[aria-hidden="true"], ${sel} .a-offscreen, ${sel}`).catch(() => null);
+                if (priceElement) {
+                  priceText = await priceElement.textContent().then(t => t.trim()).catch(() => null);
+                  if (priceText) {
+                    const cleanedPriceText = priceText.replace(/\s+/g, '');
+                    const priceMatch = cleanedPriceText.match(/[\$£€]?([\d,]+\.?\d*)/);
+                    if (priceMatch) {
+                      price = parseFloat(priceMatch[1].replace(/,/g, ''));
+                      console.log(`✅ [Playwright] Offer ${index} price sidebar (${sel}): ${price}`);
+                      break;
+                    }
+                  }
+                }
+              } catch (e) { /* next selector */ }
             }
           }
           if (!price && !priceText) {
-            console.warn(`⚠️ [Playwright] Offer ${index} price sidebar'dan çekilemedi (${sidebarSelectors.join(', ')})`);
+            console.warn(`⚠️ [Playwright] Offer ${index} price çekilemedi`);
           }
         }
         
@@ -2253,49 +2268,36 @@ class PlaywrightService {
           console.log(`✅ [Playwright] Offer ${index} shipsFrom offer element'inden çekildi: ${shipsFrom}`);
         }
         
-        // Eğer bulunamadıysa, sidebar'dan shipsFrom çek
+        // Eğer bulunamadıysa, sidebar veya offer içinden shipsFrom çek (DOM: .a-col-right = değer sütunu)
         if (!shipsFrom) {
-          // KRİTİK: Sidebar'dan shipsFrom çek
-          // Pinned offer için: #aod-offer-shipsFrom (global)
-          // Diğer offer'lar için: offer içinde #aod-offer-shipsFrom veya text içinde
+          const getShipsFromValue = async (container) => {
+            if (!container) return null;
+            const colRight = await container.$('.a-col-right .a-size-small.a-color-base, .a-fixed-left-grid-col.a-col-right span').catch(() => null);
+            if (colRight) {
+              const t = await colRight.textContent().then(x => x && x.trim()).catch(() => null);
+              if (t && !/^Ships from$/i.test(t)) return t;
+            }
+            const full = await container.textContent().then(t => t.trim()).catch(() => null);
+            if (full) {
+              const m = full.match(/Ships from\s+(.+?)(?:\s+Sold by|\s*$)/is);
+              if (m) return m[1].trim();
+            }
+            return null;
+          };
           if (isPinnedOffer) {
             try {
-              const shipsFromElement = await page.$('#aod-offer-shipsFrom').catch(() => null);
-              if (shipsFromElement) {
-                const shipsFromText = await shipsFromElement.textContent().then(t => t.trim()).catch(() => null);
-                if (shipsFromText) {
-                  // "Ships from Amazon.com" formatından "Amazon.com" çıkar
-                  const shipsFromMatch = shipsFromText.match(/Ships from\s+(.+)/i);
-                  if (shipsFromMatch) {
-                    shipsFrom = shipsFromMatch[1].trim();
-                    console.log(`✅ [Playwright] Offer ${index} shipsFrom sidebar'dan çekildi: ${shipsFrom}`);
-                  } else {
-                    shipsFrom = shipsFromText.replace(/Ships from\s*/i, '').trim();
-                  }
-                }
-              }
+              const block = await page.$('#aod-offer-shipsFrom').catch(() => null);
+              shipsFrom = await getShipsFromValue(block);
+              if (shipsFrom) console.log(`✅ [Playwright] Offer ${index} shipsFrom (.a-col-right) çekildi: ${shipsFrom}`);
             } catch (e) {
               console.warn(`⚠️ [Playwright] Offer ${index} shipsFrom sidebar'dan çekilemedi: ${e.message}`);
             }
           } else {
-            // Diğer offer'lar için: offer içinde shipsFrom bul
             try {
-              const shipsFromElement = await offerElement.$('#aod-offer-shipsFrom, [id*="shipsFrom"]').catch(() => null);
-              if (shipsFromElement) {
-                const shipsFromText = await shipsFromElement.textContent().then(t => t.trim()).catch(() => null);
-                if (shipsFromText) {
-                  const shipsFromMatch = shipsFromText.match(/Ships from\s+(.+)/i);
-                  if (shipsFromMatch) {
-                    shipsFrom = shipsFromMatch[1].trim();
-                    console.log(`✅ [Playwright] Offer ${index} shipsFrom sidebar'dan çekildi: ${shipsFrom}`);
-                  } else {
-                    shipsFrom = shipsFromText.replace(/Ships from\s*/i, '').trim();
-                  }
-                }
-              }
-            } catch (e) {
-              // Ships from bulunamadı
-            }
+              const block = await offerElement.$('#aod-offer-shipsFrom, [id*="shipsFrom"]').catch(() => null);
+              shipsFrom = await getShipsFromValue(block);
+              if (shipsFrom) console.log(`✅ [Playwright] Offer ${index} shipsFrom (offer .a-col-right) çekildi: ${shipsFrom}`);
+            } catch (e) { /* ships from bulunamadı */ }
           }
         }
       } catch (e) {
@@ -2346,42 +2348,36 @@ class PlaywrightService {
           // Diğer offer'lar için: offer içinde #aod-offer-soldBy veya text içinde
           if (isPinnedOffer) {
             try {
-              const soldByElement = await page.$('#aod-offer-soldBy').catch(() => null);
-              if (soldByElement) {
-                const soldByText = await soldByElement.textContent().then(t => t.trim()).catch(() => null);
-                if (soldByText) {
-                  // "Sold by vancasso Reactive Art Seller rating is 5 out of 5 stars..." formatından çıkar
-                  const soldByMatch = soldByText.match(/Sold by\s+([^\n\r]+?)(?:\s+Seller rating|$)/i);
-                  if (soldByMatch) {
-                    soldBy = soldByMatch[1].trim();
+              const soldByBlock = await page.$('#aod-offer-soldBy').catch(() => null);
+              if (soldByBlock) {
+                const colRight = await soldByBlock.$('.a-col-right a, .a-col-right .a-size-small.a-color-base').catch(() => null);
+                if (colRight) {
+                  const t = await colRight.textContent().then(x => x && x.trim()).catch(() => null);
+                  if (t) {
+                    soldBy = t;
                     sellerName = soldBy;
-                    console.log(`✅ [Playwright] Offer ${index} soldBy sidebar'dan çekildi: ${soldBy} -> sellerName: ${sellerName}`);
+                    console.log(`✅ [Playwright] Offer ${index} soldBy (pinned .a-col-right) çekildi: ${soldBy}`);
                   }
-                  
-                  // Seller rating - "Seller rating is 5 out of 5 stars (77 ratings)"
-                  if (!sellerRating) {
-                    const ratingMatch = soldByText.match(/(\d+(?:\.\d+)?)\s+out of\s+5\s+stars/i);
-                    if (ratingMatch) {
-                      sellerRating = parseFloat(ratingMatch[1]);
-                      console.log(`✅ [Playwright] Offer ${index} sellerRating sidebar'dan çekildi: ${sellerRating}`);
+                }
+                if (!soldBy) {
+                  const soldByText = await soldByBlock.textContent().then(t => t.trim()).catch(() => null);
+                  if (soldByText) {
+                    const soldByMatch = soldByText.match(/Sold by\s+([^\n\r]+?)(?:\s+Seller rating|$)/i);
+                    if (soldByMatch) {
+                      soldBy = soldByMatch[1].trim();
+                      sellerName = soldBy;
                     }
-                  }
-                  
-                  // KRİTİK: Seller rating count - "(77 ratings)" formatından çıkar
-                  if (!sellerRatingCount) {
-                    const ratingCountMatch = soldByText.match(/\((\d{1,3}(?:,\d{3})*|\d+)\s*(?:ratings?|değerlendirme)\)/i);
-                    if (ratingCountMatch) {
-                      sellerRatingCount = ratingCountMatch[1].replace(/,/g, '');
-                      console.log(`✅ [Playwright] Offer ${index} sellerRatingCount sidebar'dan çekildi: ${sellerRatingCount}`);
+                    if (!sellerRating) {
+                      const ratingMatch = soldByText.match(/(\d+(?:\.\d+)?)\s+out of\s+5\s+stars/i);
+                      if (ratingMatch) sellerRating = parseFloat(ratingMatch[1]);
                     }
-                  }
-                  
-                  // KRİTİK: Positive percentage - "100% positive" formatından çıkar
-                  if (!positivePercentage) {
-                    const positiveMatch = soldByText.match(/(\d+(?:\.\d+)?)\s*%\s*positive/i);
-                    if (positiveMatch) {
-                      positivePercentage = parseFloat(positiveMatch[1]);
-                      console.log(`✅ [Playwright] Offer ${index} positivePercentage sidebar'dan çekildi: ${positivePercentage}%`);
+                    if (!sellerRatingCount) {
+                      const ratingCountMatch = soldByText.match(/\((\d{1,3}(?:,\d{3})*|\d+)\s*(?:ratings?|değerlendirme)\)/i);
+                      if (ratingCountMatch) sellerRatingCount = ratingCountMatch[1].replace(/,/g, '');
+                    }
+                    if (!positivePercentage) {
+                      const positiveMatch = soldByText.match(/(\d+(?:\.\d+)?)\s*%\s*positive/i);
+                      if (positiveMatch) positivePercentage = parseFloat(positiveMatch[1]);
                     }
                   }
                 }
@@ -2432,43 +2428,38 @@ class PlaywrightService {
               console.warn(`⚠️ [Playwright] Offer ${index} soldBy sidebar'dan çekilemedi: ${e.message}`);
             }
           } else {
-            // Diğer offer'lar için: offer içinde soldBy bul
+            // Diğer offer'lar için: offer içinde soldBy — .a-col-right veya link metni
             try {
-              const soldByElement = await offerElement.$('#aod-offer-soldBy, [id*="soldBy"]').catch(() => null);
-              if (soldByElement) {
-                const soldByText = await soldByElement.textContent().then(t => t.trim()).catch(() => null);
-                if (soldByText) {
-                  const soldByMatch = soldByText.match(/Sold by\s+([^\n\r]+?)(?:\s+Seller rating|$)/i);
-                  if (soldByMatch) {
-                    soldBy = soldByMatch[1].trim();
+              const soldByBlock = await offerElement.$('#aod-offer-soldBy, [id*="soldBy"]').catch(() => null);
+              if (soldByBlock) {
+                const colRight = await soldByBlock.$('.a-col-right a.a-link-normal, .a-col-right .a-size-small.a-color-base').catch(() => null);
+                if (colRight) {
+                  const t = await colRight.textContent().then(x => x && x.trim()).catch(() => null);
+                  if (t) {
+                    soldBy = t;
                     sellerName = soldBy;
-                    console.log(`✅ [Playwright] Offer ${index} soldBy sidebar'dan çekildi: ${soldBy} -> sellerName: ${sellerName}`);
+                    console.log(`✅ [Playwright] Offer ${index} soldBy (offer .a-col-right) çekildi: ${soldBy}`);
                   }
-                  
-                  // Seller rating
-                  if (!sellerRating) {
-                    const ratingMatch = soldByText.match(/(\d+(?:\.\d+)?)\s+out of\s+5\s+stars/i);
-                    if (ratingMatch) {
-                      sellerRating = parseFloat(ratingMatch[1]);
-                      console.log(`✅ [Playwright] Offer ${index} sellerRating sidebar'dan çekildi: ${sellerRating}`);
+                }
+                if (!soldBy) {
+                  const soldByText = await soldByBlock.textContent().then(t => t.trim()).catch(() => null);
+                  if (soldByText) {
+                    const soldByMatch = soldByText.match(/Sold by\s+([^\n\r]+?)(?:\s+Seller rating|$)/i);
+                    if (soldByMatch) {
+                      soldBy = soldByMatch[1].trim();
+                      sellerName = soldBy;
                     }
-                  }
-                  
-                  // KRİTİK: Seller rating count - "(77 ratings)" formatından çıkar
-                  if (!sellerRatingCount) {
-                    const ratingCountMatch = soldByText.match(/\((\d{1,3}(?:,\d{3})*|\d+)\s*(?:ratings?|değerlendirme)\)/i);
-                    if (ratingCountMatch) {
-                      sellerRatingCount = ratingCountMatch[1].replace(/,/g, '');
-                      console.log(`✅ [Playwright] Offer ${index} sellerRatingCount sidebar'dan çekildi: ${sellerRatingCount}`);
+                    if (!sellerRating) {
+                      const ratingMatch = soldByText.match(/(\d+(?:\.\d+)?)\s+out of\s+5\s+stars/i);
+                      if (ratingMatch) sellerRating = parseFloat(ratingMatch[1]);
                     }
-                  }
-                  
-                  // KRİTİK: Positive percentage - "100% positive" formatından çıkar
-                  if (!positivePercentage) {
-                    const positiveMatch = soldByText.match(/(\d+(?:\.\d+)?)\s*%\s*positive/i);
-                    if (positiveMatch) {
-                      positivePercentage = parseFloat(positiveMatch[1]);
-                      console.log(`✅ [Playwright] Offer ${index} positivePercentage sidebar'dan çekildi: ${positivePercentage}%`);
+                    if (!sellerRatingCount) {
+                      const ratingCountMatch = soldByText.match(/\((\d{1,3}(?:,\d{3})*|\d+)\s*(?:ratings?|değerlendirme)\)/i);
+                      if (ratingCountMatch) sellerRatingCount = ratingCountMatch[1].replace(/,/g, '');
+                    }
+                    if (!positivePercentage) {
+                      const positiveMatch = soldByText.match(/(\d+(?:\.\d+)?)\s*%\s*positive/i);
+                      if (positiveMatch) positivePercentage = parseFloat(positiveMatch[1]);
                     }
                   }
                 }
@@ -2627,84 +2618,75 @@ class PlaywrightService {
         console.warn(`⚠️ [Playwright] Offer ${index} soldBy çekilirken hata: ${e.message}`);
       }
       
-      // Delivery date ve shipping price
+      // Delivery date, shipping price, "cannot be shipped" tespiti
       let deliveryDate = null;
       let shippingPrice = null;
       let expressDeliveryDate = null;
+      let cannotShipToSelectedCountry = false;
+      let deliveryMessage = null; // Modal'da: "Seçili ülkeye gönderilmiyor" veya teslimat metni
       try {
-        // KRİTİK: Önce offer element içinden delivery bilgilerini çek
-        // "$30.96 delivery Tuesday, January 27" formatından çıkar
-        const deliveryMatch = offerText.match(/[\$£€]?\s*([\d,]+\.?\d*)\s+delivery\s+((?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),?\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2})/i);
-        if (deliveryMatch) {
-          shippingPrice = parseFloat(deliveryMatch[1].replace(/,/g, ''));
-          deliveryDate = deliveryMatch[2].trim();
-          console.log(`✅ [Playwright] Offer ${index} delivery offer element'inden çekildi: shippingPrice: ${shippingPrice}, deliveryDate: ${deliveryDate}`);
-        } else {
-          // Sadece shipping price
-          const shippingMatch = offerText.match(/[\$£€]?\s*([\d,]+\.?\d*)\s+delivery/i);
-          if (shippingMatch) {
-            shippingPrice = parseFloat(shippingMatch[1].replace(/,/g, ''));
-            console.log(`✅ [Playwright] Offer ${index} shippingPrice offer element'inden çekildi: ${shippingPrice}`);
-          }
-          
-          // Sadece delivery date
-          const dateMatch = offerText.match(/((?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),?\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2})/i);
-          if (dateMatch) {
-            deliveryDate = dateMatch[1].trim();
-            console.log(`✅ [Playwright] Offer ${index} deliveryDate offer element'inden çekildi: ${deliveryDate}`);
+        // KRİTİK: "This item cannot be shipped to your selected delivery location" tespiti
+        const cannotShipEl = isPinnedOffer
+          ? await page.$('.a-color-error').catch(() => null)
+          : await offerElement.$('.a-color-error').catch(() => null);
+        if (cannotShipEl) {
+          const errText = await cannotShipEl.textContent().then(t => (t || '').trim()).catch(() => '');
+          if (/cannot be shipped to your selected|seçili.*gönderilmiyor/i.test(errText)) {
+            cannotShipToSelectedCountry = true;
+            deliveryMessage = 'Seçili ülkeye gönderilmiyor';
+            console.log(`✅ [Playwright] Offer ${index} teslimat: seçili ülkeye gönderilmiyor`);
           }
         }
-        
-        // Express delivery - "Or fastest delivery Friday, January 23"
-        const expressMatch = offerText.match(/fastest\s+delivery\s+((?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),?\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2})/i);
-        if (expressMatch) {
-          expressDeliveryDate = expressMatch[1].trim();
-          console.log(`✅ [Playwright] Offer ${index} expressDeliveryDate offer element'inden çekildi: ${expressDeliveryDate}`);
-        }
-        
-        // Eğer bulunamadıysa, sidebar'dan delivery bilgilerini çek
-        if (!deliveryDate && !shippingPrice && !expressDeliveryDate) {
-          // KRİTİK: Sidebar'dan delivery bilgilerini çek
-          // Pinned offer için: #mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE_LARGE (global)
-          // Diğer offer'lar için: offer içinde delivery bilgileri
+        if (!cannotShipToSelectedCountry) {
+          // data-csa-c-delivery-time / data-csa-c-delivery-price (pinned: sidebar; liste: satır içi)
+          let deliverySpan = null;
           if (isPinnedOffer) {
+            deliverySpan = await page.$('#unified-delivery-message span[data-csa-c-delivery-time], #mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE_LARGE span[data-csa-c-delivery-time], [data-csa-c-delivery-time]').catch(() => null);
+          } else {
+            deliverySpan = await offerElement.$('span[data-csa-c-delivery-time]').catch(() => null);
+            if (!deliverySpan) deliverySpan = await page.$(`#unified-delivery-message-${index - 1} span[data-csa-c-delivery-time]`).catch(() => null);
+          }
+          if (deliverySpan) {
+            deliveryDate = await deliverySpan.getAttribute('data-csa-c-delivery-time').catch(() => null) || await deliverySpan.textContent().then(t => t.trim()).catch(() => null);
+            const priceAttr = await deliverySpan.getAttribute('data-csa-c-delivery-price').catch(() => null);
+            if (priceAttr) {
+              const priceMatch = String(priceAttr).match(/[\$£€]?([\d,]+\.?\d*)/);
+              if (priceMatch) shippingPrice = parseFloat(priceMatch[1].replace(/,/g, ''));
+            }
+          }
+          // Önce offer element içinden delivery bilgilerini çek
+          const deliveryMatch = offerText.match(/[\$£€]?\s*([\d,]+\.?\d*)\s+delivery\s+((?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),?\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2})/i);
+          if (deliveryMatch) {
+            if (shippingPrice == null) shippingPrice = parseFloat(deliveryMatch[1].replace(/,/g, ''));
+            if (!deliveryDate) deliveryDate = deliveryMatch[2].trim();
+          } else {
+            const shippingMatch = offerText.match(/[\$£€]?\s*([\d,]+\.?\d*)\s+delivery/i);
+            if (shippingMatch && shippingPrice == null) shippingPrice = parseFloat(shippingMatch[1].replace(/,/g, ''));
+            const dateMatch = offerText.match(/((?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),?\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2})|(?:February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2}\s*-\s*(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2}/i);
+            if (dateMatch && !deliveryDate) deliveryDate = dateMatch[0].trim();
+          }
+          const expressMatch = offerText.match(/fastest\s+delivery\s+((?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),?\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2})/i);
+          if (expressMatch) expressDeliveryDate = expressMatch[1].trim();
+          if (deliveryDate || shippingPrice != null) deliveryMessage = [shippingPrice != null ? `$${shippingPrice}` : '', deliveryDate].filter(Boolean).join(' ');
+          if (!deliveryDate && !shippingPrice && !expressDeliveryDate && isPinnedOffer) {
             try {
-              // Standard delivery: #mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE_LARGE > span
-              const standardDeliveryElement = await page.$('#mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE_LARGE > span').catch(() => null);
+              const standardDeliveryElement = await page.$('#mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE_LARGE > span, #unified-delivery-message span').catch(() => null);
               if (standardDeliveryElement) {
                 const standardDeliveryText = await standardDeliveryElement.textContent().then(t => t.trim()).catch(() => null);
                 if (standardDeliveryText) {
-                  // "$58.34 delivery Monday, January 26" formatından çıkar
                   const shippingMatch = standardDeliveryText.match(/[\$£€]?\s*([\d,]+\.?\d*)\s+delivery/i);
-                  if (shippingMatch) {
-                    shippingPrice = parseFloat(shippingMatch[1].replace(/,/g, ''));
-                  }
-                  
-                  // Delivery date çıkar
-                  const dateMatch = standardDeliveryText.match(/((?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),?\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2})/i);
-                  if (dateMatch) {
-                    deliveryDate = dateMatch[1].trim();
-                  }
-                  
-                  console.log(`✅ [Playwright] Offer ${index} standard delivery sidebar'dan çekildi: ${standardDeliveryText} -> shippingPrice: ${shippingPrice}, deliveryDate: ${deliveryDate}`);
+                  if (shippingMatch) shippingPrice = parseFloat(shippingMatch[1].replace(/,/g, ''));
+                  const dateMatch = standardDeliveryText.match(/((?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),?\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2})|(?:February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2}\s*-\s*(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2}/i);
+                  if (dateMatch) deliveryDate = dateMatch[0].trim();
+                  deliveryMessage = standardDeliveryText;
                 }
               }
-              
-              // Express delivery: #mir-layout-DELIVERY_BLOCK-slot-SECONDARY_DELIVERY_MESSAGE_LARGE > span
               const expressDeliveryElement = await page.$('#mir-layout-DELIVERY_BLOCK-slot-SECONDARY_DELIVERY_MESSAGE_LARGE > span').catch(() => null);
-              if (expressDeliveryElement) {
-                const expressDeliveryText = await expressDeliveryElement.textContent().then(t => t.trim()).catch(() => null);
-                if (expressDeliveryText) {
-                  // "Or fastest delivery Friday, January 23" formatından çıkar
-                  const dateMatch = expressDeliveryText.match(/((?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),?\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2})/i);
-                  if (dateMatch) {
-                    expressDeliveryDate = dateMatch[1].trim();
-                    console.log(`✅ [Playwright] Offer ${index} express delivery sidebar'dan çekildi: ${expressDeliveryText} -> expressDeliveryDate: ${expressDeliveryDate}`);
-                  }
-                }
+              if (expressDeliveryElement && !expressDeliveryDate) {
+                expressDeliveryDate = await expressDeliveryElement.textContent().then(t => t.trim()).catch(() => null);
               }
             } catch (e) {
-              console.warn(`⚠️ [Playwright] Offer ${index} delivery sidebar'dan çekilemedi: ${e.message}`);
+              console.warn(`⚠️ [Playwright] Offer ${index} delivery sidebar: ${e.message}`);
             }
           }
         }
@@ -2793,6 +2775,9 @@ class PlaywrightService {
         shippingPrice: shippingPrice, // Standard shipping price (geriye dönük uyumluluk)
         standardShippingPrice: shippingPrice, // Standard shipping price
         expressShippingPrice: null, // Express shipping price (henüz çekilmiyor, ileride eklenebilir)
+        // KRİTİK: Seçili ülkeye gönderilmiyor (navbarda seçili ülkeye gönderim yok)
+        cannotShipToSelectedCountry: !!cannotShipToSelectedCountry,
+        deliveryMessage: deliveryMessage || null, // "Seçili ülkeye gönderilmiyor" veya teslimat metni
         isBuybox: !!isPinnedOffer // Pinned offer = Buybox (modal'da "Buybox" etiketi için)
       };
     } catch (e) {
@@ -3539,32 +3524,18 @@ class PlaywrightService {
             const i = offerIndex;
             const offer = toProcess[j];
             try {
-              try {
-                const moreButton = await offer.$('a.a-link-normal.aod-delivery-morelink, #aod-delivery-more-action > a, a[aria-label*="More"]').catch(() => null);
-                if (moreButton) {
-                  console.log(`🔗 [Playwright] Seller ${i + 2} için "More" butonu bulundu, tıklanıyor...`);
-                  await moreButton.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {});
-                  await this.safeWait(page, 300);
-                  await moreButton.click({ timeout: 10000 }).catch(() => {});
-                  console.log(`✅ [Playwright] Seller ${i + 2} için "More" butonuna tıklandı`);
-                  await this.safeWait(page, 1500);
-                }
-              } catch (moreError) {
-                console.warn(`⚠️ [Playwright] Seller ${i + 2} için "More" butonuna tıklanamadı: ${moreError.message}`);
-              }
-              await offer.click().catch(() => {});
-              await this.safeWait(page, 500);
+              // KRİTİK: Satır içinden veri oku (tıklamaya gerek yok — #aod-price-{i+1}, ships from/sold by/delivery satırda)
               const sellerData = await this.extractSellerDataFromOffer(page, offer, i + 1, false);
               if (sellerData) {
                 sellers.push(sellerData);
-                console.log(`✅ [Playwright] Seller ${i + 2} sidebar'dan çekildi: ${sellerData.sellerName || sellerData.soldBy || 'N/A'}`);
+                console.log(`✅ [Playwright] Seller ${i + 2} satırdan çekildi: ${sellerData.sellerName || sellerData.soldBy || 'N/A'}`);
               }
             } catch (e) {
-              console.warn(`⚠️ [Playwright] Seller ${i + 2} sidebar'dan çekilirken hata: ${e.message}`);
+              console.warn(`⚠️ [Playwright] Seller ${i + 2} satırdan çekilirken hata: ${e.message}`);
             }
             processedCount++;
             offerIndex++;
-            await this.safeWait(page, 400);
+            await this.safeWait(page, 200);
           }
           if (processedCount >= maxOther) break;
           await scrollAndWait();
