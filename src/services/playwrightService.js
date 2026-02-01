@@ -3382,8 +3382,8 @@ class PlaywrightService {
         console.warn(`⚠️ [Playwright] "See more" linki kontrol edilemedi: ${e.message}`);
       }
 
-      // KRİTİK: totalSellers kadar satıcı görmek için offer listesini scroll et (lazy-load — 8 satıcı varsa 8'i de yükle)
-      const targetOther = totalSellers > 0 ? totalSellers - 1 : 25;
+      // KRİTİK: Scroll hedefi — en az 15 liste satırı yükle (totalSellers yanlış/eksik olsa bile diğer satıcılar görünsün)
+      const targetOther = Math.max(totalSellers > 0 ? totalSellers - 1 : 25, 15);
       const getOfferCount = async () => {
         const bySection = await page.$$('#aod-offer-list > div.a-section').then(els => els.length).catch(() => 0);
         if (bySection > 0) return bySection;
@@ -3481,7 +3481,9 @@ class PlaywrightService {
           }
           if (offerElements.length === 0) offerElements = await page.$$('#aod-offer-list > *').catch(() => []);
         }
-        const maxOther = totalSellers > 0 ? Math.min(totalSellers - 1, 50) : 50;
+        // KRİTİK: Tüm bulunan liste satırlarını işle (totalSellers "1 other" olsa bile sayfada 8 satır varsa 8'ini al)
+        const maxOther = 50;
+        console.log(`📊 [Playwright] ASIN ${asin} liste satır sayısı (DOM): ${offerElements.length}, totalSellers (okunan): ${totalSellers}, işlenecek max: ${maxOther}`);
         let processedCount = 0;
         let offerIndex = 0;
         let noProgressCount = 0;
