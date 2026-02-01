@@ -3569,10 +3569,12 @@ class PlaywrightService {
             sellerMap.set(sellerKey, seller);
             uniqueSellers.push(seller);
           } else {
-            // Aynı seller'ın başka bir offer'ı, en iyi fiyatlı olanı tut (veya ilkini)
+            // Aynı seller'ın başka bir offer'ı — buybox'ı koru, yoksa en iyi fiyatlı olanı tut
             const existingSeller = sellerMap.get(sellerKey);
-            // Eğer yeni offer daha düşük fiyatlıysa, onu kullan
-            if (seller.price && existingSeller.price && seller.price < existingSeller.price) {
+            const preferNew = (seller.price && existingSeller.price && seller.price < existingSeller.price) || (seller.isBuybox && !existingSeller.isBuybox);
+            if (preferNew) {
+              // Yeni satırı kullanırken mevcut buybox bilgisini koru (aynı satıcı 2 kez görünmesin)
+              if (existingSeller.isBuybox && !seller.isBuybox) seller.isBuybox = true;
               sellerMap.set(sellerKey, seller);
               const index = uniqueSellers.findIndex(s => {
                 const sName = s.sellerName ? s.sellerName.toLowerCase().trim().replace(/\s+/g, ' ') : null;
@@ -3580,9 +3582,7 @@ class PlaywrightService {
                 const sKey = (sName || sSoldBy || `seller-${s.index}`).toLowerCase().trim();
                 return sKey === sellerKey;
               });
-              if (index !== -1) {
-                uniqueSellers[index] = seller;
-              }
+              if (index !== -1) uniqueSellers[index] = seller;
             }
           }
         }
@@ -3594,10 +3594,8 @@ class PlaywrightService {
         uniqueSellers = []; // Hata durumunda boş array
       }
       
-      // KRİTİK: Her TEKLİF bir satır — aynı satıcı 2 farklı fiyatla listeliyorsa 2 satır, 1 fiyatla 1 satır.
-      // Aynı satıcı + aynı fiyat (veya ikisi de fiyatsız) çift kayıt = tek satır. Tek satıcılı ürünlerde pinned + list aynı satıcı olabiliyor.
-      const preferAllOffers = true;
-      let finalSellers = preferAllOffers ? sellers : (uniqueSellers.length > 0 ? uniqueSellers : sellers);
+      // KRİTİK: Aynı satıcı tek satır — pinned + list aynı satıcı (örn. Amazon.com) ise 2 kez gösterme
+      let finalSellers = uniqueSellers.length > 0 ? uniqueSellers : sellers;
       const seenOfferKey = new Set();
       const priceValFor = (s) => (s.price != null && !Number.isNaN(Number(s.price)) ? Number(s.price).toFixed(2) : 'noprice');
       const canonicalSellerName = (name) => {
