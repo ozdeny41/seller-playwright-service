@@ -3,14 +3,14 @@ const { chromium } = require('playwright');
 
 class PlaywrightService {
   constructor() {
-    console.log('✅ [Seller Playwright] Initializing (10 sekme, browser bir kere — vixify-playwright-service-batch mantığı)...');
+    console.log('✅ [Seller Playwright] Initializing (20 sekme, browser bir kere — vixify-playwright-service-batch mantığı)...');
     this.browser = null;
     this.browserLaunchPromise = null;
     this.contexts = new Map();
     this.contextSetupStatus = new Map();
     this.pagePools = new Map();
     this.pagePoolIndex = new Map();
-    this.pagePoolSize = 10;
+    this.pagePoolSize = 20;
   }
 
   getContextKey(sourceMarketplace, targetCountryCode) {
@@ -3496,7 +3496,7 @@ class PlaywrightService {
   }
 
   /**
-   * Get seller information for multiple ASINs in a single browser session (10 sekme paralel — vixify-playwright-service-batch mantığı).
+   * Get seller information for multiple ASINs in a single browser session (20 sekme paralel — vixify-playwright-service-batch mantığı).
    * Ülke + para birimi seçimi 1 kez yapılır, sonra ASIN değiştirerek AOD sayfaları gezilir.
    * @param {string[]} asins
    * @param {string} sourceMarketplace
@@ -3513,16 +3513,16 @@ class PlaywrightService {
         return { success: false, data: null, error: 'ASIN list is required', status: 400 };
       }
 
-      console.log(`🎭 [Seller Playwright] Batch: ${asinList.length} ASIN, 10 sekme paralel (browser bir kere)`);
+      console.log(`🎭 [Seller Playwright] Batch: ${asinList.length} ASIN, 20 sekme paralel (browser bir kere)`);
 
-      // 1) Browser bir kere, 2) Context + ülke bir kere, 3) 10 sekme pool
+      // 1) Browser bir kere, 2) Context + ülke bir kere, 3) 20 sekme pool
       await this.getBrowser();
       await this.getOrCreateContext(sourceMarketplace, targetCountry);
       const pages = await this.getPagePool(sourceMarketplace, targetCountry);
       const key = this.getContextKey(sourceMarketplace, targetCountry);
 
       const items = [];
-      const batchSize = 10;
+      const batchSize = 20;
 
       for (let i = 0; i < asinList.length; i += batchSize) {
         const batch = asinList.slice(i, i + batchSize);

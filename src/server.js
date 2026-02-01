@@ -80,16 +80,6 @@ browserInstallationPromise && browserInstallationPromise.then(() => {
   global.__browserInstallationInProgress = false;
 }).catch(() => { global.__browserInstallationInProgress = false; });
 
-// Railway logları için: unhandledRejection / uncaughtException
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('❌ [Seller Playwright] unhandledRejection:', reason);
-  if (reason && reason.stack) console.error(reason.stack);
-});
-process.on('uncaughtException', (err) => {
-  console.error('❌ [Seller Playwright] uncaughtException:', err.message);
-  if (err.stack) console.error(err.stack);
-});
-
 const app = express();
 const PORT = process.env.PORT || 3002;
 
@@ -128,11 +118,10 @@ app.get('/health', (req, res) => {
 // Routes
 app.use('/api', require('./routes'));
 
-// Error handling - EAGAIN için 503 (Railway kaynak limiti)
+// Error handling
 app.use((err, req, res, next) => {
-  const status = err.status || (err.isEAGAIN ? 503 : 500);
-  console.error('❌ [Playwright Service] Error:', err.message || err, 'status:', status);
-  res.status(status).json({
+  console.error('❌ [Playwright Service] Error:', err);
+  res.status(err.status || 500).json({
     ok: false,
     error: err.message || 'Internal server error'
   });
@@ -142,7 +131,7 @@ app.use((err, req, res, next) => {
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 [Seller Playwright] Server running on port ${PORT}`);
   console.log(`📡 [Seller Playwright] Health check: http://0.0.0.0:${PORT}/health`);
-  console.log(`📡 [Seller Playwright] Batch: 10 sekme, browser bir kere açık (vixify-playwright-service-batch mantığı)`);
+  console.log(`📡 [Seller Playwright] Batch: 20 sekme, browser bir kere açık (vixify-playwright-service-batch mantığı)`);
   setImmediate(() => {
     try {
       const playwrightService = require('./services/playwrightService');
