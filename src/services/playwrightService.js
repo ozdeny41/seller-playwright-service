@@ -3425,20 +3425,35 @@ class PlaywrightService {
       }
       
       // KRİTİK: Her TEKLİF bir satır — aynı satıcı 2 farklı fiyatla listeliyorsa 2 satır, 1 fiyatla 1 satır.
-      // Aynı satıcı + aynı fiyat çift kayıt varsa tek satırda birleştir (çift görünmeyi önle).
+      // Aynı satıcı + aynı fiyat (veya ikisi de fiyatsız) çift kayıt = tek satır. Tek satıcılı ürünlerde pinned + list aynı satıcı olabiliyor.
       const preferAllOffers = true;
       let finalSellers = preferAllOffers ? sellers : (uniqueSellers.length > 0 ? uniqueSellers : sellers);
       const seenOfferKey = new Set();
-      finalSellers = finalSellers.filter(s => {
+      const priceValFor = (s) => (s.price != null && !Number.isNaN(Number(s.price)) ? Number(s.price).toFixed(2) : 'noprice');
+      const nameKeyFor = (s, fallback) => {
         const nameNorm = (s.sellerName || s.soldBy || '').toLowerCase().trim().replace(/\s+/g, ' ');
-        const nameKey = nameNorm && nameNorm.length >= 2 ? nameNorm : `idx-${s.index ?? seenOfferKey.size}`;
-        const priceVal = s.price != null && !Number.isNaN(Number(s.price)) ? Number(s.price).toFixed(2) : '';
+        return nameNorm && nameNorm.length >= 2 ? nameNorm : (fallback != null ? fallback : `idx-${s.index ?? seenOfferKey.size}`);
+      };
+      finalSellers = finalSellers.filter(s => {
+        const nameKey = nameKeyFor(s, null);
+        const priceVal = priceValFor(s);
         const key = `${nameKey}|${priceVal}`;
         if (seenOfferKey.has(key)) {
           console.log(`🔍 [Playwright] Çift teklif atlandı (aynı satıcı + aynı fiyat): ${s.sellerName || s.soldBy} @ ${priceVal}`);
           return false;
         }
         seenOfferKey.add(key);
+        return true;
+      });
+      // Aynı satıcı hem fiyatlı hem fiyatsız görünüyorsa (pinned vs list aynı satıcı, birinde price null): sadece fiyatlı olanı tut
+      const nameKeysWithPrice = new Set(finalSellers.filter(s => priceValFor(s) !== 'noprice').map(s => nameKeyFor(s, null)));
+      finalSellers = finalSellers.filter(s => {
+        const pv = priceValFor(s);
+        const nk = nameKeyFor(s, null);
+        if (pv === 'noprice' && nameKeysWithPrice.has(nk)) {
+          console.log(`🔍 [Playwright] Aynı satıcının fiyatsız kopyası atlandı (fiyatlı olan tutuldu): ${s.sellerName || s.soldBy}`);
+          return false;
+        }
         return true;
       });
       let finalTotalSellers = finalSellers.length;
