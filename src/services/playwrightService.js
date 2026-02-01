@@ -3640,10 +3640,11 @@ class PlaywrightService {
         const nameNorm = a || b || '';
         return nameNorm && nameNorm.length >= 2 ? nameNorm : (fallback != null ? fallback : `idx-${s.index ?? seenOfferKey.size}`);
       };
-      finalSellers = finalSellers.filter(s => {
+      finalSellers = finalSellers.filter((s, idx) => {
         const nameKey = nameKeyFor(s, null);
         const priceVal = priceValFor(s);
-        const key = `${nameKey}|${priceVal}`;
+        // KRİTİK: Fiyat okunamadığında (noprice) her offer satırını ayrı tut — aynı satıcı 4 teklif = 4 satır (modalda hepsi görünsün)
+        const key = priceVal === 'noprice' ? `${nameKey}|${priceVal}|${s.index ?? idx}` : `${nameKey}|${priceVal}`;
         if (seenOfferKey.has(key)) {
           console.log(`🔍 [Playwright] Çift teklif atlandı (aynı satıcı + aynı fiyat): ${s.sellerName || s.soldBy} @ ${priceVal}`);
           return false;
@@ -3651,17 +3652,7 @@ class PlaywrightService {
         seenOfferKey.add(key);
         return true;
       });
-      // Aynı satıcı hem fiyatlı hem fiyatsız görünüyorsa (pinned vs list aynı satıcı, birinde price null): sadece fiyatlı olanı tut
-      const nameKeysWithPrice = new Set(finalSellers.filter(s => priceValFor(s) !== 'noprice').map(s => nameKeyFor(s, null)));
-      finalSellers = finalSellers.filter(s => {
-        const pv = priceValFor(s);
-        const nk = nameKeyFor(s, null);
-        if (pv === 'noprice' && nameKeysWithPrice.has(nk)) {
-          console.log(`🔍 [Playwright] Aynı satıcının fiyatsız kopyası atlandı (fiyatlı olan tutuldu): ${s.sellerName || s.soldBy}`);
-          return false;
-        }
-        return true;
-      });
+      // KRİTİK: "Fiyatsız kopya atlandı" kaldırıldı — sayfada 4 teklif varsa 4 satır döndür (fiyat okunamasa bile modalda hepsi görünsün)
       let finalTotalSellers = finalSellers.length;
       
       // KRİTİK: Total seller sayısını, döndürülen listenin uzunluğuna göre düzelt
