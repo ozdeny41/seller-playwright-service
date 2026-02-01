@@ -3430,8 +3430,16 @@ class PlaywrightService {
       let finalSellers = preferAllOffers ? sellers : (uniqueSellers.length > 0 ? uniqueSellers : sellers);
       const seenOfferKey = new Set();
       const priceValFor = (s) => (s.price != null && !Number.isNaN(Number(s.price)) ? Number(s.price).toFixed(2) : 'noprice');
+      const canonicalSellerName = (name) => {
+        const n = (name || '').toLowerCase().trim().replace(/\s+/g, ' ');
+        if (!n || n.length < 2) return n;
+        if (n === 'amazon' || n === 'amazon.com' || n.startsWith('amazon.') || n.includes('amazon.')) return 'amazon';
+        return n;
+      };
       const nameKeyFor = (s, fallback) => {
-        const nameNorm = (s.sellerName || s.soldBy || '').toLowerCase().trim().replace(/\s+/g, ' ');
+        const a = canonicalSellerName(s.sellerName || '');
+        const b = canonicalSellerName(s.soldBy || '');
+        const nameNorm = a || b || '';
         return nameNorm && nameNorm.length >= 2 ? nameNorm : (fallback != null ? fallback : `idx-${s.index ?? seenOfferKey.size}`);
       };
       finalSellers = finalSellers.filter(s => {
