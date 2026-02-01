@@ -2858,6 +2858,57 @@ class PlaywrightService {
       // Sayfanın yüklenmesini bekle
       await this.safeWait(page, 3000);
 
+      // KRİTİK: directAodUrl ile AOD sidebar bazen açılmıyor (Amazon değişikliği). Container yoksa PDP'den "New & Used" ile aç.
+      try {
+        await this.safeWait(page, 2000); // Sidebar'ın geç yüklenmesi için
+        const aodContainer = await page.$('#aod-offer-list, #aod-pinned-offer, #aod-container, #all-offers-display').catch(() => null);
+        if (!aodContainer) {
+          console.warn(`⚠️ [Playwright] AOD container direct URL ile bulunamadı, PDP'den "New & Used" ile açılıyor...`);
+          await page.goto(productUrl, { waitUntil: 'domcontentloaded', timeout: 18000 });
+          await this.safeWait(page, 2500);
+          let newAndUsedLink = await page.$('a#aod-ingress-link').catch(() => null);
+          if (!newAndUsedLink) {
+            newAndUsedLink = await page.$('#dynamic-aod-ingress-box a, a[href*="aod"], a[href*="olp"]').catch(() => null);
+          }
+          if (!newAndUsedLink) {
+            const allLinks = await page.$$('a').catch(() => []);
+            for (const link of allLinks.slice(0, 80)) {
+              const text = await link.textContent().catch(() => '');
+              const href = await link.getAttribute('href').catch(() => '');
+              if ((text.includes('New & Used') || text.includes('Other sellers') || href.includes('aod') || href.includes('olp')) && href) {
+                newAndUsedLink = link;
+                break;
+              }
+            }
+          }
+          if (newAndUsedLink) {
+            let href = await newAndUsedLink.getAttribute('href').catch(() => null);
+            if (href) {
+              if (!href.startsWith('http')) href = `${baseUrl}${href.startsWith('/') ? href : '/' + href}`;
+              if (href.includes('#') && !href.includes('/gp/offer-listing/')) {
+                const aodUrl = `${baseUrl}/gp/offer-listing/${asin}?condition=NEW&ie=UTF8`;
+                console.log(`🔗 [Playwright] Hash link tespit edildi, offer-listing URL'ye gidiliyor: ${aodUrl}`);
+                await page.goto(aodUrl, { waitUntil: 'domcontentloaded', timeout: 18000 });
+              } else {
+                console.log(`🔗 [Playwright] New & Used href ile gidiliyor: ${href.substring(0, 80)}...`);
+                await page.goto(href, { waitUntil: 'domcontentloaded', timeout: 18000 });
+              }
+              await this.safeWait(page, 3000);
+            } else {
+              await newAndUsedLink.click({ timeout: 15000 }).catch(() => newAndUsedLink.click({ force: true, timeout: 15000 }));
+              await this.safeWait(page, 3000);
+            }
+          } else {
+            const aodUrl = `${baseUrl}/gp/offer-listing/${asin}?condition=NEW&ie=UTF8`;
+            console.log(`🔗 [Playwright] New & Used link bulunamadı, klasik offer-listing URL deneniyor: ${aodUrl}`);
+            await page.goto(aodUrl, { waitUntil: 'domcontentloaded', timeout: 18000 });
+            await this.safeWait(page, 3000);
+          }
+        }
+      } catch (fallbackErr) {
+        console.warn(`⚠️ [Playwright] AOD fallback hatası: ${fallbackErr.message}`);
+      }
+
       if (!isOnAodPage) {
         console.log(`⏳ [Playwright] Sayfa yüklendi, "New & Used" linki aranıyor...`);
       
@@ -3231,8 +3282,8 @@ class PlaywrightService {
       // AOD (All Offers Display) container'ını bekle - KRİTİK: Sidebar açılması için bekle
       console.log(`🛒 [Playwright] Seller listesi container'ı bekleniyor (sidebar açılması için)...`);
       try {
-        // Önce sidebar container'ını bekle
-        await page.waitForSelector('#all-offers-display, #aod-container, #aod-offer-list, #aod-offer, #aod-pinned-offer', { timeout: 10000, state: 'visible' });
+        // Önce sidebar container'ını bekle (timeout 15s — yavaş sayfalarda da görünsün)
+        await page.waitForSelector('#all-offers-display, #aod-container, #aod-offer-list, #aod-offer, #aod-pinned-offer', { timeout: 15000, state: 'visible' });
         console.log(`✅ [Playwright] Seller listesi container bulundu`);
         
         // KRİTİK: Sidebar'ın tamamen yüklenmesi için ek bekleme
@@ -3307,11 +3358,18 @@ class PlaywrightService {
         console.warn(`⚠️ [Playwright] "See more" linki kontrol edilemedi: ${e.message}`);
       }
 
-      // KRİTİK: totalSellers kadar satıcı görmek için offer listesini scroll et (lazy-load ile sadece görünenler DOM'da)
-      const targetOther = totalSellers > 0 ? totalSellers - 1 : 20;
-      for (let scrollRound = 0; scrollRound < 8; scrollRound++) {
-        const currentCount = await page.$$('#aod-offer-list > div.a-section').then(els => els.length).catch(() => 0)
-          || await page.$$('#aod-offer-list > div').then(els => els.length).catch(() => 0);
+      // KRİTİK: totalSellers kadar satıcı görmek için offer listesini scroll et (lazy-load — 8 satıcı varsa 8'i de yükle)
+      const targetOther = totalSellers > 0 ? totalSellers - 1 : 25;
+      const getOfferCount = async () => {
+        const bySection = await page.$$('#aod-offer-list > div.a-section').then(els => els.length).catch(() => 0);
+        if (bySection > 0) return bySection;
+        const byDiv = await page.$$('#aod-offer-list > div').then(els => els.length).catch(() => 0);
+        if (byDiv > 0) return byDiv;
+        const byAny = await page.$$('#aod-offer-list > div[id^="aod-offer"], #aod-offer-list > *').then(els => els.length).catch(() => 0);
+        return byAny;
+      };
+      for (let scrollRound = 0; scrollRound < 25; scrollRound++) {
+        const currentCount = await getOfferCount();
         if (currentCount >= targetOther) break;
         try {
           await page.evaluate(() => {
@@ -3319,12 +3377,20 @@ class PlaywrightService {
             if (list) list.scrollTop = list.scrollHeight;
             const container = document.querySelector('#aod-container, #all-offers-display');
             if (container) container.scrollTop = container.scrollHeight;
+            let el = list || container;
+            while (el && el.parentElement) {
+              if (el.scrollHeight > el.clientHeight) {
+                el.scrollTop = el.scrollHeight;
+              }
+              el = el.parentElement;
+            }
           });
-          await this.safeWait(page, 800);
+          await this.safeWait(page, 1800);
         } catch (e) { break; }
       }
+      await this.safeWait(page, 1500);
 
-      // Tüm seller offer'larını çek - KRİTİK: Sidebar'dan tüm bilgileri çek
+      // Tüm seller offer'larını çek - KRİTİK: Sidebar'dan tüm bilgileri çek (ilk 2 değil, hedef sayısına kadar)
       const sellers = [];
       let uniqueSellers = [];
       try {
@@ -3343,48 +3409,91 @@ class PlaywrightService {
           console.warn(`⚠️ [Playwright] Pinned offer çekilemedi: ${e.message}`);
         }
         
-        // Sadece gerçek offer container'ları — #aod-offer-list > div.a-section (her biri bir satıcı)
-        // div[id^="aod-offer-"] aod-offer-shipsFrom vb. dahil çok fazla eşleşme veriyordu
-        let offerElements = await page.$$('#aod-offer-list > div.a-section');
-        if (offerElements.length === 0) {
-          offerElements = await page.$$('#aod-offer-list > div').catch(() => []);
+        // Diğer offer'ları bul — hem doğrudan çocuk hem liste içi .a-section; hedef sayıya kadar scroll + tekrar dene
+        let offerElements = await page.$$('#aod-offer-list > div.a-section').catch(() => []);
+        if (offerElements.length === 0) offerElements = await page.$$('#aod-offer-list > div').catch(() => []);
+        if (offerElements.length < targetOther) {
+          const alt = await page.$$('#aod-offer-list div.a-section').catch(() => []);
+          if (alt.length > offerElements.length) offerElements = alt;
         }
-        // Sadece totalSellers-1 kadar işle (1 pinned zaten çekildi)
-        const maxOther = totalSellers > 0 ? Math.min(totalSellers - 1, offerElements.length) : offerElements.length;
-        offerElements = offerElements.slice(0, maxOther);
-        console.log(`🔍 [Playwright] ${offerElements.length} diğer satıcı işlenecek (toplam hedef: ${totalSellers})`);
-        
-        for (let i = 0; i < offerElements.length; i++) {
-          const offer = offerElements[i];
-          try {
-            // KRİTİK: Her offer için önce "More" butonuna tıkla (eğer varsa)
-            // "More" butonu: a.a-link-normal.aod-delivery-morelink veya #aod-delivery-more-action > a
-            try {
-              // Offer içinde "More" butonunu bul
-              const moreButton = await offer.$('a.a-link-normal.aod-delivery-morelink, #aod-delivery-more-action > a, a[aria-label*="More"]').catch(() => null);
-              if (moreButton) {
-                console.log(`🔗 [Playwright] Seller ${i + 2} için "More" butonu bulundu, tıklanıyor...`);
-                await moreButton.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {});
-                await this.safeWait(page, 300);
-                await moreButton.click({ timeout: 10000 }).catch(() => {});
-                console.log(`✅ [Playwright] Seller ${i + 2} için "More" butonuna tıklandı`);
-                await this.safeWait(page, 1500); // Detayların yüklenmesi için bekle
-              }
-            } catch (moreError) {
-              console.warn(`⚠️ [Playwright] Seller ${i + 2} için "More" butonuna tıklanamadı: ${moreError.message}`);
-            }
-            
-            // Her offer için sidebar'dan bilgileri çek (index'e göre selector'lar kullanılacak)
-            await offer.click().catch(() => {});
-            await this.safeWait(page, 500);
-            const sellerData = await this.extractSellerDataFromOffer(page, offer, i + 1, false);
-            if (sellerData) {
-              sellers.push(sellerData);
-              console.log(`✅ [Playwright] Seller ${i + 2}/${offerElements.length + 1} sidebar'dan çekildi: ${sellerData.sellerName || sellerData.soldBy || 'N/A'}`);
-            }
-          } catch (e) {
-            console.warn(`⚠️ [Playwright] Seller ${i + 2} sidebar'dan çekilirken hata: ${e.message}`);
+        if (offerElements.length === 0) offerElements = await page.$$('#aod-offer-list > div[id^="aod-offer"], #aod-offer-list > *').catch(() => []);
+        for (let retry = 0; offerElements.length < targetOther && retry < 12; retry++) {
+          await page.evaluate(() => {
+            const list = document.querySelector('#aod-offer-list');
+            const container = document.querySelector('#aod-container, #all-offers-display');
+            [list, container].filter(Boolean).forEach(el => { el.scrollTop = el.scrollHeight; });
+          });
+          await this.safeWait(page, 2000);
+          offerElements = await page.$$('#aod-offer-list > div.a-section').catch(() => []);
+          if (offerElements.length === 0) offerElements = await page.$$('#aod-offer-list > div').catch(() => []);
+          if (offerElements.length < targetOther) {
+            const alt = await page.$$('#aod-offer-list div.a-section').catch(() => []);
+            if (alt.length > offerElements.length) offerElements = alt;
           }
+          if (offerElements.length === 0) offerElements = await page.$$('#aod-offer-list > *').catch(() => []);
+        }
+        const maxOther = totalSellers > 0 ? Math.min(totalSellers - 1, 50) : 50;
+        let processedCount = 0;
+        let offerIndex = 0;
+        let noProgressCount = 0;
+        const scrollAndWait = async () => {
+          await page.evaluate(() => {
+            const list = document.querySelector('#aod-offer-list');
+            const container = document.querySelector('#aod-container, #all-offers-display');
+            [list, container].filter(Boolean).forEach(el => { el.scrollTop = el.scrollHeight; });
+          });
+          await this.safeWait(page, 2000);
+        };
+        const getOfferList = async () => {
+          let list = await page.$$('#aod-offer-list > div.a-section').catch(() => []);
+          if (list.length === 0) list = await page.$$('#aod-offer-list > div').catch(() => []);
+          if (list.length === 0) list = await page.$$('#aod-offer-list div.a-section').catch(() => []);
+          if (list.length === 0) list = await page.$$('#aod-offer-list > *').catch(() => []);
+          return list;
+        };
+        while (processedCount < maxOther) {
+          const listNow = await getOfferList();
+          const toProcess = listNow.slice(processedCount, maxOther);
+          if (toProcess.length === 0) {
+            noProgressCount++;
+            if (noProgressCount > 4 || processedCount === 0) break;
+            await scrollAndWait();
+            continue;
+          }
+          noProgressCount = 0;
+          for (let j = 0; j < toProcess.length; j++) {
+            const i = offerIndex;
+            const offer = toProcess[j];
+            try {
+              try {
+                const moreButton = await offer.$('a.a-link-normal.aod-delivery-morelink, #aod-delivery-more-action > a, a[aria-label*="More"]').catch(() => null);
+                if (moreButton) {
+                  console.log(`🔗 [Playwright] Seller ${i + 2} için "More" butonu bulundu, tıklanıyor...`);
+                  await moreButton.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {});
+                  await this.safeWait(page, 300);
+                  await moreButton.click({ timeout: 10000 }).catch(() => {});
+                  console.log(`✅ [Playwright] Seller ${i + 2} için "More" butonuna tıklandı`);
+                  await this.safeWait(page, 1500);
+                }
+              } catch (moreError) {
+                console.warn(`⚠️ [Playwright] Seller ${i + 2} için "More" butonuna tıklanamadı: ${moreError.message}`);
+              }
+              await offer.click().catch(() => {});
+              await this.safeWait(page, 500);
+              const sellerData = await this.extractSellerDataFromOffer(page, offer, i + 1, false);
+              if (sellerData) {
+                sellers.push(sellerData);
+                console.log(`✅ [Playwright] Seller ${i + 2} sidebar'dan çekildi: ${sellerData.sellerName || sellerData.soldBy || 'N/A'}`);
+              }
+            } catch (e) {
+              console.warn(`⚠️ [Playwright] Seller ${i + 2} sidebar'dan çekilirken hata: ${e.message}`);
+            }
+            processedCount++;
+            offerIndex++;
+            await this.safeWait(page, 400);
+          }
+          if (processedCount >= maxOther) break;
+          await scrollAndWait();
         }
         
         console.log(`✅ [Playwright] Toplam ${sellers.length} seller offer çekildi`);
@@ -3485,6 +3594,9 @@ class PlaywrightService {
       if (!finalTotalSellers || finalTotalSellers < finalSellers.length) {
         finalTotalSellers = finalSellers.length;
       }
+
+      // Log: ASIN başına kaç satıcı bulundu (Railway loglarında "ASIN B000WJIC3G" vb. aranabilir)
+      console.log(`📊 [Playwright] ASIN ${asin} için ${finalSellers.length} satıcı bulundu (totalSellers: ${finalTotalSellers})`);
       
       return {
         success: true,
