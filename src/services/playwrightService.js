@@ -228,14 +228,21 @@ class PlaywrightService {
     if (!countryCode || typeof countryCode !== 'string') return 'US';
     const raw = countryCode.toString().trim().toLowerCase();
     const map = {
-      'usa': 'US', 'us': 'US', 'america': 'US', 'united states': 'US',
-      'uk': 'GB', 'gb': 'GB', 'germany': 'DE', 'de': 'DE', 'france': 'FR', 'fr': 'FR',
-      'italy': 'IT', 'it': 'IT', 'spain': 'ES', 'es': 'ES', 'japan': 'JP', 'jp': 'JP',
-      'canada': 'CA', 'ca': 'CA', 'australia': 'AU', 'au': 'AU',
-      'netherlands': 'NL', 'nl': 'NL', 'belgium': 'BE', 'be': 'BE',
-      'singapore': 'SG', 'sg': 'SG', 'mexico': 'MX', 'mx': 'MX',
-      'amazon.com': 'US', 'amazon.co.uk': 'GB', 'amazon.de': 'DE', 'amazon.fr': 'FR',
-      'amazon.it': 'IT', 'amazon.es': 'ES', 'amazon.co.jp': 'JP', 'amazon.ca': 'CA'
+      'usa': 'US', 'us': 'US', 'america': 'US', 'united states': 'US', 'amazon.com': 'US',
+      'uk': 'GB', 'gb': 'GB', 'amazon.co.uk': 'GB',
+      'germany': 'DE', 'de': 'DE', 'amazon.de': 'DE',
+      'france': 'FR', 'fr': 'FR', 'amazon.fr': 'FR',
+      'italy': 'IT', 'it': 'IT', 'amazon.it': 'IT',
+      'spain': 'ES', 'es': 'ES', 'amazon.es': 'ES',
+      'japan': 'JP', 'jp': 'JP', 'amazon.co.jp': 'JP',
+      'canada': 'CA', 'ca': 'CA', 'amazon.ca': 'CA',
+      'australia': 'AU', 'au': 'AU', 'amazon.com.au': 'AU',
+      'netherlands': 'NL', 'nl': 'NL', 'belgium': 'BE', 'be': 'BE', 'amazon.nl': 'NL',
+      'singapore': 'SG', 'sg': 'SG', 'mexico': 'MX', 'mx': 'MX', 'amazon.com.mx': 'MX',
+      'india': 'IN', 'in': 'IN', 'amazon.in': 'IN',
+      'turkey': 'TR', 'tr': 'TR', 'amazon.com.tr': 'TR',
+      'poland': 'PL', 'pl': 'PL', 'amazon.pl': 'PL',
+      'sweden': 'SE', 'se': 'SE', 'amazon.se': 'SE'
     };
     return map[raw] || (raw.length === 2 ? raw.toUpperCase() : 'US');
   }
