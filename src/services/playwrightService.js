@@ -3658,7 +3658,8 @@ class PlaywrightService {
         uniqueSellers = []; // Hata durumunda boş array
       }
       
-      // KRİTİK: Aynı satıcı tek satır — pinned + list aynı satıcı (örn. Amazon.com) ise 2 kez gösterme
+      // KRİTİK: Sadece tamamen aynı olan offer'ları filtrele (sellerName + price + condition)
+      // Farklı condition'lardaki offer'ları göster (New vs Used - Very Good farklı satırlar olmalı)
       let finalSellers = uniqueSellers.length > 0 ? uniqueSellers : sellers;
       const seenOfferKey = new Set();
       const priceValFor = (s) => (s.price != null && !Number.isNaN(Number(s.price)) ? Number(s.price).toFixed(2) : 'noprice');
@@ -3678,10 +3679,12 @@ class PlaywrightService {
       finalSellers = finalSellers.filter((s, idx) => {
         const nameKey = nameKeyFor(s, null);
         const priceVal = priceValFor(s);
-        // KRİTİK: Fiyat okunamadığında (noprice) her offer satırını ayrı tut — aynı satıcı 4 teklif = 4 satır (modalda hepsi görünsün)
-        const key = priceVal === 'noprice' ? `${nameKey}|${priceVal}|${s.index ?? idx}` : `${nameKey}|${priceVal}`;
+        const conditionVal = (s.condition || '').trim().toLowerCase();
+        // KRİTİK: Condition'ı da dahil et - aynı satıcı + aynı fiyat + aynı condition = duplicate
+        // Farklı condition'lardaki offer'ları göster (New vs Used - Very Good farklı satırlar)
+        const key = `${nameKey}|${priceVal}|${conditionVal}`;
         if (seenOfferKey.has(key)) {
-          console.log(`🔍 [Playwright] Çift teklif atlandı (aynı satıcı + aynı fiyat): ${s.sellerName || s.soldBy} @ ${priceVal}`);
+          console.log(`🔍 [Playwright] Çift teklif atlandı (aynı satıcı + aynı fiyat + aynı condition): ${s.sellerName || s.soldBy} @ ${priceVal} (${conditionVal})`);
           return false;
         }
         seenOfferKey.add(key);
