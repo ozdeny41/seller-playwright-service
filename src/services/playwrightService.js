@@ -28,6 +28,13 @@ class PlaywrightService {
     // HTML tag'lerini kaldır
     cleaned = cleaned.replace(/<[^>]*>/g, '');
     
+    // HTML entity'leri decode et
+    cleaned = cleaned.replace(/&quot;/g, '"');
+    cleaned = cleaned.replace(/&amp;/g, '&');
+    cleaned = cleaned.replace(/&lt;/g, '<');
+    cleaned = cleaned.replace(/&gt;/g, '>');
+    cleaned = cleaned.replace(/&nbsp;/g, ' ');
+    
     // CSS kodlarını kaldır (/* ... */ ve { ... } blokları)
     cleaned = cleaned.replace(/\/\*[\s\S]*?\*\//g, ''); // CSS comments
     cleaned = cleaned.replace(/\{[^}]*\}/g, ''); // CSS rules
@@ -36,6 +43,7 @@ class PlaywrightService {
     cleaned = cleaned.replace(/\.execute\([^)]*\)/g, ''); // .execute() calls
     cleaned = cleaned.replace(/function\s*\([^)]*\)\s*\{[^}]*\}/g, ''); // function() {}
     cleaned = cleaned.replace(/\(function\s*\([^)]*\)\s*\{[^}]*\}\)/g, ''); // (function() {})
+    cleaned = cleaned.replace(/\.execute\('[\w-]+',\s*function\s*\([^)]*\)\s*\{[^}]*\}\)/g, ''); // .execute('a-popover-count', function() {})
     
     // Amazon-specific marketing text'leri kaldır
     cleaned = cleaned.replace(/List Price/gi, '');
@@ -46,16 +54,23 @@ class PlaywrightService {
     cleaned = cleaned.replace(/prevailing market price/gi, '');
     cleaned = cleaned.replace(/as provided by a manufacturer/gi, '');
     cleaned = cleaned.replace(/supplier, or seller/gi, '');
+    cleaned = cleaned.replace(/Sim: https:\/\/sim\.amazon\.com\/issues\/[^\s]+/gi, ''); // Sim: https://sim.amazon.com/issues/...
     
     // CSS class isimlerini kaldır (nokta ile başlayan)
     cleaned = cleaned.replace(/\.\w+/g, '');
     
-    // Fazla boşlukları temizle
-    cleaned = cleaned.replace(/\s+/g, ' ').trim();
+    // CSS property'leri kaldır (color:, font-weight:, margin-right:, vb.)
+    cleaned = cleaned.replace(/[a-z-]+:\s*[^;]+;?/gi, '');
     
     // "See less" gibi Amazon UI text'lerini kaldır
     cleaned = cleaned.replace(/See less/gi, '').trim();
     cleaned = cleaned.replace(/See more/gi, '').trim();
+    
+    // Fazla boşlukları temizle
+    cleaned = cleaned.replace(/\s+/g, ' ').trim();
+    
+    // Boş string kontrolü
+    if (!cleaned || cleaned.length === 0) return '';
     
     return cleaned;
   }
