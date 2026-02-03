@@ -2814,10 +2814,12 @@ class PlaywrightService {
         sellerRating: sellerRating, // Yıldız puanı (1-5)
         sellerRatingCount: sellerRatingCount, // Değerlendirme sayısı (örn: "77" veya "1234")
         positivePercentage: positivePercentage, // Pozitif yüzde (örn: 100, 98)
-        // KRİTİK: Teslimat bilgileri - Ayrı field'lar olarak
+        // KRİTİK: Teslimat bilgileri - Ayrı field'lar olarak (hem text hem date formatı)
         deliveryDate: deliveryDate, // Standard delivery date (geriye dönük uyumluluk)
         standardDeliveryDate: deliveryDate, // Standard delivery date
+        standardDeliveryDateText: deliveryDate, // Standard delivery date text (modal'da gösterilecek)
         expressDeliveryDate: expressDeliveryDate || null, // Express/Fast delivery date
+        expressDeliveryDateText: expressDeliveryDate || null, // Express delivery date text (modal'da gösterilecek)
         // KRİTİK: Gönderim fiyatları - Ayrı field'lar olarak
         shippingPrice: shippingPrice, // Standard shipping price (geriye dönük uyumluluk)
         standardShippingPrice: shippingPrice, // Standard shipping price
@@ -3441,8 +3443,10 @@ class PlaywrightService {
         console.warn(`⚠️ [Playwright] "See more" linki kontrol edilemedi: ${e.message}`);
       }
 
-      // KRİTİK: Scroll hedefi — en az 15 liste satırı yükle (totalSellers yanlış/eksik olsa bile diğer satıcılar görünsün)
-      const targetOther = Math.max(totalSellers > 0 ? totalSellers - 1 : 25, 15);
+      // KRİTİK: Scroll hedefi — totalSellers kadar liste satırı yükle (eğer totalSellers 8 ise 8 satıcı çekilmeli)
+      // Pinned offer hariç, listedeki diğer satıcılar: totalSellers - 1 (pinned dahil toplam totalSellers)
+      // Eğer totalSellers bilinmiyorsa veya 0 ise, en az 25 satır yükle
+      const targetOther = totalSellers > 0 ? Math.max(totalSellers - 1, 1) : 25;
       const getOfferCount = async () => {
         const bySection = await page.$$('#aod-offer-list > div.a-section').then(els => els.length).catch(() => 0);
         if (bySection > 0) return bySection;
@@ -3540,8 +3544,9 @@ class PlaywrightService {
           }
           if (offerElements.length === 0) offerElements = await page.$$('#aod-offer-list > *').catch(() => []);
         }
-        // KRİTİK: Tüm bulunan liste satırlarını işle (totalSellers "1 other" olsa bile sayfada 8 satır varsa 8'ini al)
-        const maxOther = 50;
+        // KRİTİK: Tüm bulunan liste satırlarını işle (totalSellers kadar çek - eğer totalSellers 8 ise 8 satıcı çekilmeli)
+        // Eğer totalSellers bilinmiyorsa veya 0 ise, DOM'da görünen tüm satırları çek (max 50)
+        const maxOther = totalSellers > 0 ? totalSellers : 50;
         console.log(`📊 [Playwright] ASIN ${asin} liste satır sayısı (DOM): ${offerElements.length}, totalSellers (okunan): ${totalSellers}, işlenecek max: ${maxOther}`);
         let processedCount = 0;
         let offerIndex = 0;
