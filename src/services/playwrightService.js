@@ -3698,17 +3698,47 @@ class PlaywrightService {
       // Log: ASIN başına kaç satıcı bulundu (Railway loglarında "ASIN B000WJIC3G" vb. aranabilir)
       console.log(`📊 [Playwright] ASIN ${asin} için ${finalSellers.length} satıcı bulundu (totalSellers: ${finalTotalSellers})`);
       
+      // KRİTİK: Seller'ların detaylarını logla
+      if (finalSellers.length > 0) {
+        console.log(`✅ [Playwright] ASIN ${asin} için seller örnekleri:`, finalSellers.slice(0, 3).map(s => ({
+          sellerName: s.sellerName,
+          soldBy: s.soldBy,
+          price: s.price,
+          condition: s.condition,
+          isBuybox: s.isBuybox,
+          index: s.index
+        })));
+      } else {
+        console.warn(`⚠️ [Playwright] ASIN ${asin} için HİÇ SATICI BULUNAMADI!`);
+        console.warn(`⚠️ [Playwright] Debug bilgileri:`, {
+          uniqueSellersLength: uniqueSellers.length,
+          sellersLength: sellers.length,
+          finalSellersLength: finalSellers.length,
+          finalTotalSellers: finalTotalSellers
+        });
+      }
+      
+      const buyboxSeller = finalSellers.find(s => s.isBuybox) || null;
+      const responseData = {
+        asin: asin,
+        sourceMarketplace: sourceMarketplace,
+        targetCountry: targetCountry,
+        totalSellers: finalTotalSellers,
+        sellers: finalSellers,
+        marketplace: 'source',
+        buybox: buyboxSeller
+      };
+      
+      console.log(`📤 [Playwright] ASIN ${asin} için response data hazırlanıyor:`, {
+        sellersCount: responseData.sellers.length,
+        hasBuybox: !!responseData.buybox,
+        totalSellers: responseData.totalSellers,
+        responseDataKeys: Object.keys(responseData)
+      });
+      
       return {
         success: true,
-        data: {
-          asin: asin,
-          sourceMarketplace: sourceMarketplace,
-          targetCountry: targetCountry,
-          totalSellers: finalTotalSellers,
-          sellers: finalSellers,
-          marketplace: 'source',
-          buybox: finalSellers.find(s => s.isBuybox) || null
-        },
+        data: responseData,
         error: null,
         status: 200
       };

@@ -167,13 +167,28 @@ router.post('/', async (req, res, next) => {
       hasData: !!result.data,
       sellersCount: result.data?.sellers?.length || 0,
       itemsCount: result.data?.items?.length || 0,
-      error: result.error || null
+      error: result.error || null,
+      dataKeys: result.data ? Object.keys(result.data) : [],
+      firstSeller: result.data?.sellers?.[0] ? {
+        sellerName: result.data.sellers[0].sellerName,
+        soldBy: result.data.sellers[0].soldBy,
+        price: result.data.sellers[0].price,
+        condition: result.data.sellers[0].condition
+      } : null
     });
     const requestDuration = Date.now() - requestStartTime;
     console.log(`⏱️ [Playwright Service] Request süresi: ${requestDuration}ms`);
     if (result.success) {
+      const responsePayload = { ok: true, data: result.data };
       console.log(`✅ [Playwright Service] ========== POST /api/sellers REQUEST BAŞARILI ==========`);
-      res.json({ ok: true, data: result.data });
+      console.log(`📤 [Playwright Service] Response payload:`, {
+        ok: responsePayload.ok,
+        hasData: !!responsePayload.data,
+        sellersCount: responsePayload.data?.sellers?.length || 0,
+        totalSellers: responsePayload.data?.totalSellers || 0,
+        hasBuybox: !!responsePayload.data?.buybox
+      });
+      res.json(responsePayload);
     } else {
       console.log(`❌ [Playwright Service] ========== POST /api/sellers REQUEST BAŞARISIZ ==========`);
       res.status(result.status || 500).json({ 
