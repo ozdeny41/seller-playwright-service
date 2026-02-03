@@ -15,6 +15,51 @@ class PlaywrightService {
     this.RECYCLE_AFTER_REQUESTS = 50;
   }
 
+  /**
+   * Amazon'un HTML/CSS/JavaScript kodlarını temizle
+   * @param {string} text - Temizlenecek text
+   * @returns {string} - Temizlenmiş text
+   */
+  cleanAmazonHtml(text) {
+    if (!text || typeof text !== 'string') return text || '';
+    
+    let cleaned = text;
+    
+    // HTML tag'lerini kaldır
+    cleaned = cleaned.replace(/<[^>]*>/g, '');
+    
+    // CSS kodlarını kaldır (/* ... */ ve { ... } blokları)
+    cleaned = cleaned.replace(/\/\*[\s\S]*?\*\//g, ''); // CSS comments
+    cleaned = cleaned.replace(/\{[^}]*\}/g, ''); // CSS rules
+    
+    // JavaScript kodlarını kaldır
+    cleaned = cleaned.replace(/\.execute\([^)]*\)/g, ''); // .execute() calls
+    cleaned = cleaned.replace(/function\s*\([^)]*\)\s*\{[^}]*\}/g, ''); // function() {}
+    cleaned = cleaned.replace(/\(function\s*\([^)]*\)\s*\{[^}]*\}\)/g, ''); // (function() {})
+    
+    // Amazon-specific marketing text'leri kaldır
+    cleaned = cleaned.replace(/List Price/gi, '');
+    cleaned = cleaned.replace(/savings/gi, '');
+    cleaned = cleaned.replace(/Learn more/gi, '');
+    cleaned = cleaned.replace(/The is the suggested retail price/gi, '');
+    cleaned = cleaned.replace(/may not necessarily reflect/gi, '');
+    cleaned = cleaned.replace(/prevailing market price/gi, '');
+    cleaned = cleaned.replace(/as provided by a manufacturer/gi, '');
+    cleaned = cleaned.replace(/supplier, or seller/gi, '');
+    
+    // CSS class isimlerini kaldır (nokta ile başlayan)
+    cleaned = cleaned.replace(/\.\w+/g, '');
+    
+    // Fazla boşlukları temizle
+    cleaned = cleaned.replace(/\s+/g, ' ').trim();
+    
+    // "See less" gibi Amazon UI text'lerini kaldır
+    cleaned = cleaned.replace(/See less/gi, '').trim();
+    cleaned = cleaned.replace(/See more/gi, '').trim();
+    
+    return cleaned;
+  }
+
   async closeBrowserForRecycle() {
     console.log('🔄 [Seller Playwright] Bellek önleme: browser ve context\'ler kapatılıyor...');
     try {
@@ -2795,16 +2840,25 @@ class PlaywrightService {
         console.log(`✅ [Playwright] Offer ${index} SBA ama seller yok — "Amazon" set edildi (frontend merge için)`);
       }
       
+      // KRİTİK: Amazon'un HTML/CSS/JavaScript kodlarını temizle
+      const cleanPriceText = this.cleanAmazonHtml(priceText || '');
+      const cleanSellerName = this.cleanAmazonHtml(sellerName || '');
+      const cleanSoldBy = this.cleanAmazonHtml(soldBy || '');
+      const cleanShipsFrom = this.cleanAmazonHtml(shipsFrom || '');
+      const cleanDeliveryDate = this.cleanAmazonHtml(deliveryDate || '');
+      const cleanExpressDeliveryDate = this.cleanAmazonHtml(expressDeliveryDate || '');
+      const cleanDeliveryMessage = this.cleanAmazonHtml(deliveryMessage || '');
+      
       return {
         index: index,
         condition: condition,
         isNew: isNew, // Modal'da gösterilecek: New mi?
         isUsed: isUsed, // Modal'da gösterilecek: Used mi?
         price: price,
-        priceText: priceText,
-        shipsFrom: shipsFrom,
-        soldBy: soldBy,
-        sellerName: sellerName,
+        priceText: cleanPriceText,
+        shipsFrom: cleanShipsFrom,
+        soldBy: cleanSoldBy,
+        sellerName: cleanSellerName,
         // KRİTİK: Fulfillment Type (FBA/FBM/SBA)
         fulfillmentType: fulfillmentType,
         isFBA: isFBA,
@@ -2815,18 +2869,18 @@ class PlaywrightService {
         sellerRatingCount: sellerRatingCount, // Değerlendirme sayısı (örn: "77" veya "1234")
         positivePercentage: positivePercentage, // Pozitif yüzde (örn: 100, 98)
         // KRİTİK: Teslimat bilgileri - Ayrı field'lar olarak (hem text hem date formatı)
-        deliveryDate: deliveryDate, // Standard delivery date (geriye dönük uyumluluk)
-        standardDeliveryDate: deliveryDate, // Standard delivery date
-        standardDeliveryDateText: deliveryDate, // Standard delivery date text (modal'da gösterilecek)
-        expressDeliveryDate: expressDeliveryDate || null, // Express/Fast delivery date
-        expressDeliveryDateText: expressDeliveryDate || null, // Express delivery date text (modal'da gösterilecek)
+        deliveryDate: cleanDeliveryDate, // Standard delivery date (geriye dönük uyumluluk)
+        standardDeliveryDate: cleanDeliveryDate, // Standard delivery date
+        standardDeliveryDateText: cleanDeliveryDate, // Standard delivery date text (modal'da gösterilecek)
+        expressDeliveryDate: cleanExpressDeliveryDate || null, // Express/Fast delivery date
+        expressDeliveryDateText: cleanExpressDeliveryDate || null, // Express delivery date text (modal'da gösterilecek)
         // KRİTİK: Gönderim fiyatları - Ayrı field'lar olarak
         shippingPrice: shippingPrice, // Standard shipping price (geriye dönük uyumluluk)
         standardShippingPrice: shippingPrice, // Standard shipping price
         expressShippingPrice: null, // Express shipping price (henüz çekilmiyor, ileride eklenebilir)
         // KRİTİK: Seçili ülkeye gönderilmiyor (navbarda seçili ülkeye gönderim yok)
         cannotShipToSelectedCountry: !!cannotShipToSelectedCountry,
-        deliveryMessage: deliveryMessage || null, // "Seçili ülkeye gönderilmiyor" veya teslimat metni
+        deliveryMessage: cleanDeliveryMessage || null, // "Seçili ülkeye gönderilmiyor" veya teslimat metni
         isBuybox: !!isPinnedOffer // Pinned offer = Buybox (modal'da "Buybox" etiketi için)
       };
     } catch (e) {
@@ -3882,6 +3936,14 @@ class PlaywrightService {
         rawShippingText: buyboxData.rawShippingText || buyboxData.shippingText || null,
         productPrice: (typeof buyboxData.price === 'number' && buyboxData.price > 0) ? buyboxData.price : null
       };
+      // KRİTİK: Amazon'un HTML/CSS/JavaScript kodlarını temizle
+      const cleanBuyboxPriceText = this.cleanAmazonHtml(buyboxData.priceText || '');
+      const cleanBuyboxSellerName = this.cleanAmazonHtml(buyboxData.sellerName || '');
+      const cleanBuyboxSoldBy = this.cleanAmazonHtml(buyboxData.soldBy || buyboxData.sellerName || '');
+      const cleanBuyboxShipsFrom = this.cleanAmazonHtml(buyboxData.shipsFrom || '');
+      const cleanBuyboxDeliveryDate = this.cleanAmazonHtml(buyboxData.standardDeliveryDate || '');
+      const cleanBuyboxExpressDeliveryDate = this.cleanAmazonHtml(buyboxData.expressDeliveryDate || '');
+      
       const sellersData = {
         sellers: [{
           index: 0,
@@ -3890,17 +3952,17 @@ class PlaywrightService {
           isNew: buyboxData.isNew !== false,
           isUsed: buyboxData.isUsed === true,
           price: buyboxData.price,
-          priceText: buyboxData.priceText,
-          shipsFrom: buyboxData.shipsFrom,
-          soldBy: buyboxData.soldBy || buyboxData.sellerName,
-          sellerName: buyboxData.sellerName,
+          priceText: cleanBuyboxPriceText,
+          shipsFrom: cleanBuyboxShipsFrom,
+          soldBy: cleanBuyboxSoldBy,
+          sellerName: cleanBuyboxSellerName,
           fulfillmentType: buyboxData.fulfillmentType || 'FBM',
           isFBA: buyboxData.isFBA || false,
           isFBM: buyboxData.isFBM !== false,
           isSBA: buyboxData.isSBA || false,
-          deliveryDate: buyboxData.standardDeliveryDate,
-          standardDeliveryDate: buyboxData.standardDeliveryDate,
-          expressDeliveryDate: buyboxData.expressDeliveryDate,
+          deliveryDate: cleanBuyboxDeliveryDate,
+          standardDeliveryDate: cleanBuyboxDeliveryDate,
+          expressDeliveryDate: cleanBuyboxExpressDeliveryDate,
           shippingPrice: buyboxData.standardShippingPrice || buyboxData.shippingPrice,
           standardShippingPrice: buyboxData.standardShippingPrice || buyboxData.shippingPrice,
           expressShippingPrice: buyboxData.expressShippingPrice
