@@ -2150,7 +2150,9 @@ class PlaywrightService {
           // KRİTİK: Teslimat tarihleri
           deliveryDate: cleanBuyboxStandardDeliveryDate || null, // Geriye dönük uyumluluk
           standardDeliveryDate: cleanBuyboxStandardDeliveryDate || null,
+          standardDeliveryDateText: cleanBuyboxStandardDeliveryDate || null, // Frontend için text field
           expressDeliveryDate: cleanBuyboxExpressDeliveryDate || null,
+          expressDeliveryDateText: cleanBuyboxExpressDeliveryDate || null, // Frontend için text field
           // KRİTİK: Satıcı değerlendirme bilgileri (buybox için genellikle yok ama field'ları ekle)
           sellerRating: null, // Buybox'ta satıcı rating genellikle gösterilmiyor
           sellerRatingCount: null,
@@ -2798,19 +2800,38 @@ class PlaywrightService {
             }
           }
           
-          // KRİTİK: Express delivery bilgisini çek (eğer varsa)
+          // KRİTİK: Express delivery bilgisini çek (eğer varsa) - hem pinned offer hem diğer offer'lar için
           // DOM Path: div#mir-layout-DELIVERY_BLOCK-slot-SECONDARY_DELIVERY_MESSAGE_LARGE
-          if (!isPinnedOffer && !expressDeliveryDate) {
+          if (!expressDeliveryDate) {
             try {
-              const expressDeliveryElement = await page.$(`div#mir-layout-DELIVERY_BLOCK-slot-SECONDARY_DELIVERY_MESSAGE_LARGE, #unified-delivery-message-${index - 1} div#mir-layout-DELIVERY_BLOCK-slot-SECONDARY_DELIVERY_MESSAGE_LARGE`).catch(() => null);
+              let expressDeliveryElement = null;
+              if (isPinnedOffer) {
+                // Pinned offer için global selector
+                expressDeliveryElement = await page.$('div#mir-layout-DELIVERY_BLOCK-slot-SECONDARY_DELIVERY_MESSAGE_LARGE').catch(() => null);
+              } else {
+                // Diğer offer'lar için: offer içinde veya global
+                expressDeliveryElement = await offerElement.$('div#mir-layout-DELIVERY_BLOCK-slot-SECONDARY_DELIVERY_MESSAGE_LARGE').catch(() => null);
+                if (!expressDeliveryElement) {
+                  expressDeliveryElement = await page.$(`div#mir-layout-DELIVERY_BLOCK-slot-SECONDARY_DELIVERY_MESSAGE_LARGE, #unified-delivery-message-${index - 1} div#mir-layout-DELIVERY_BLOCK-slot-SECONDARY_DELIVERY_MESSAGE_LARGE`).catch(() => null);
+                }
+              }
+              
               if (expressDeliveryElement) {
                 const expressText = await expressDeliveryElement.textContent().then(t => t.trim()).catch(() => null);
-                if (expressText && expressText.toLowerCase().includes('fastest')) {
+                if (expressText) {
                   // "Or fastest delivery February 19 - March 5" formatından tarihi çıkar
                   const expressDateMatch = expressText.match(/((?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),?\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2}\s*-\s*(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2})|((?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2}\s*-\s*(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2})/i);
                   if (expressDateMatch) {
                     expressDeliveryDate = expressDateMatch[0].trim();
                     console.log(`✅ [Playwright] Offer ${index} express delivery date çekildi: ${expressDeliveryDate}`);
+                  } else {
+                    // Eğer regex match olmazsa, tüm text'i al (zaten tarih formatında olabilir)
+                    expressDeliveryDate = expressText.replace(/^Or fastest delivery\s+/i, '').trim();
+                    if (expressDeliveryDate && expressDeliveryDate.length > 5) {
+                      console.log(`✅ [Playwright] Offer ${index} express delivery date text'ten çekildi: ${expressDeliveryDate}`);
+                    } else {
+                      expressDeliveryDate = null;
+                    }
                   }
                 }
               }
@@ -3817,25 +3838,23 @@ class PlaywrightService {
       };
       const priceValFor = (s) => (s.price != null && !Number.isNaN(Number(s.price)) ? Number(s.price).toFixed(2) : 'noprice');
       
-      // KRİTİK: Buybox satıcısını tekrar göstermemek için - sidebar'da en üstteki satıcı (pinned offer) buybox satıcısı ile aynı ise onu listeden çıkar
-      // Buybox satıcısı zaten birinci satıcı olarak gösteriliyor, sidebar'da en üstteki satıcı buybox satıcısı ile aynı ise tekrar göstermemeliyiz
+      // KRİTİK: Buybox satıcısını tekrar göstermemek için - sidebar'daki diğer satıcılardan buybox satıcısını çıkar
+      // Buybox satıcısı zaten birinci satıcı olarak gösteriliyor, sidebar'daki listede (pinned offer hariç) buybox satıcısı tekrar gösterilmemeli
+      // NOT: Pinned offer buybox satıcısı olabilir ama o zaten buybox olarak gösteriliyor, listede tekrar gösterilmemeli
       let sellersWithoutDuplicateBuybox = sellers;
       if (buyboxData && sellers.length > 0) {
         const buyboxSellerName = canonicalSellerName(buyboxData.sellerName || buyboxData.soldBy || '');
         const buyboxSoldBy = canonicalSellerName(buyboxData.soldBy || buyboxData.sellerName || '');
         
-        // Pinned offer'ı kontrol et - eğer buybox satıcısı ile aynıysa listeden çıkar
-        sellersWithoutDuplicateBuybox = sellers.filter((seller, idx) => {
-          // İlk satıcı (pinned offer) buybox satıcısı ile aynı mı kontrol et
-          if (idx === 0 && seller.isBuybox) {
-            const sellerNameNorm = canonicalSellerName(seller.sellerName || '');
-            const sellerSoldByNorm = canonicalSellerName(seller.soldBy || '');
-            const isSameAsBuybox = (buyboxSellerName && (sellerNameNorm === buyboxSellerName || sellerSoldByNorm === buyboxSellerName)) ||
-                                   (buyboxSoldBy && (sellerNameNorm === buyboxSoldBy || sellerSoldByNorm === buyboxSoldBy));
-            if (isSameAsBuybox) {
-              console.log(`🔍 [Playwright] Pinned offer buybox satıcısı ile aynı, listeden çıkarılıyor: ${seller.sellerName || seller.soldBy}`);
-              return false; // Buybox satıcısını listeden çıkar
-            }
+        // Tüm satıcılardan buybox satıcısını çıkar (pinned offer dahil - çünkü buybox zaten ayrı gösteriliyor)
+        sellersWithoutDuplicateBuybox = sellers.filter((seller) => {
+          const sellerNameNorm = canonicalSellerName(seller.sellerName || '');
+          const sellerSoldByNorm = canonicalSellerName(seller.soldBy || '');
+          const isSameAsBuybox = (buyboxSellerName && (sellerNameNorm === buyboxSellerName || sellerSoldByNorm === buyboxSellerName)) ||
+                                 (buyboxSoldBy && (sellerNameNorm === buyboxSoldBy || sellerSoldByNorm === buyboxSoldBy));
+          if (isSameAsBuybox) {
+            console.log(`🔍 [Playwright] Buybox satıcısı listeden çıkarılıyor (tekrar gösterilmeyecek): ${seller.sellerName || seller.soldBy}`);
+            return false; // Buybox satıcısını listeden çıkar
           }
           return true;
         });
@@ -3896,7 +3915,9 @@ class PlaywrightService {
         });
       }
       
-      const buyboxSeller = finalSellers.find(s => s.isBuybox) || null;
+      // KRİTİK: Buybox data'yı direkt kullan - finalSellers içinde arama (çünkü buybox satıcısı listeden çıkarılmış olabilir)
+      // Buybox data zaten extractBuyboxData'dan geliyor ve condition bilgisi dahil
+      const buyboxSeller = buyboxData || finalSellers.find(s => s.isBuybox) || null;
       const responseData = {
         asin: asin,
         sourceMarketplace: sourceMarketplace,
