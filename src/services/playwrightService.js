@@ -3759,6 +3759,150 @@ class PlaywrightService {
       console.error(`❌ [Seller Playwright] closeBrowserAfterBatch: ${e.message}`);
     }
   }
+
+  /**
+   * PDP sayfasından shipping + seller bilgilerini çek (batch-shipping-results formatında)
+   * vixify-playwright-service-batch getSellerInfoFromPage mantığı
+   */
+  async getSellerInfoFromPage(page, asin, sourceMarketplace, targetCountryCode) {
+    try {
+      if (!page || page.isClosed()) {
+        return { success: false, shippingData: null, sellersData: null, error: 'Sayfa kapalı' };
+      }
+      let buyboxData = await this.extractBuyboxData(page);
+      const hasShipping = buyboxData && (buyboxData.rawShippingText || buyboxData.shippingText || (buyboxData.standardShippingPrice != null) || buyboxData.standardDeliveryDate || buyboxData.standardDeliveryDateText);
+      if (buyboxData && !hasShipping) {
+        await this.safeWait(page, 3000);
+        const retryBuybox = await this.extractBuyboxData(page);
+        if (retryBuybox && (retryBuybox.rawShippingText || retryBuybox.shippingText || (retryBuybox.standardShippingPrice != null) || retryBuybox.standardDeliveryDate)) {
+          buyboxData = retryBuybox;
+        }
+      }
+      if (!buyboxData || (!buyboxData.price && !buyboxData.sellerName && !buyboxData.standardShippingPrice)) {
+        return { success: false, shippingData: null, sellersData: null, error: 'Buybox bilgisi çekilemedi' };
+      }
+      const shippingData = {
+        standardShippingPrice: buyboxData.standardShippingPrice || buyboxData.shippingPrice || null,
+        expressShippingPrice: buyboxData.expressShippingPrice || null,
+        standardDeliveryDate: buyboxData.standardDeliveryDate || buyboxData.standardDeliveryDateText || null,
+        expressDeliveryDate: buyboxData.expressDeliveryDate || buyboxData.expressDeliveryDateText || null,
+        standardDeliveryDateText: buyboxData.standardDeliveryDateText || buyboxData.standardDeliveryDate || null,
+        expressDeliveryDateText: buyboxData.expressDeliveryDateText || buyboxData.expressDeliveryDate || null,
+        shippingPriceText: buyboxData.shippingPriceText || buyboxData.shippingText || null,
+        rawShippingText: buyboxData.rawShippingText || buyboxData.shippingText || null,
+        productPrice: (typeof buyboxData.price === 'number' && buyboxData.price > 0) ? buyboxData.price : null
+      };
+      const sellersData = {
+        sellers: [{
+          index: 0,
+          isBuybox: true,
+          condition: buyboxData.condition || 'New',
+          isNew: buyboxData.isNew !== false,
+          isUsed: buyboxData.isUsed === true,
+          price: buyboxData.price,
+          priceText: buyboxData.priceText,
+          shipsFrom: buyboxData.shipsFrom,
+          soldBy: buyboxData.soldBy || buyboxData.sellerName,
+          sellerName: buyboxData.sellerName,
+          fulfillmentType: buyboxData.fulfillmentType || 'FBM',
+          isFBA: buyboxData.isFBA || false,
+          isFBM: buyboxData.isFBM !== false,
+          isSBA: buyboxData.isSBA || false,
+          deliveryDate: buyboxData.standardDeliveryDate,
+          standardDeliveryDate: buyboxData.standardDeliveryDate,
+          expressDeliveryDate: buyboxData.expressDeliveryDate,
+          shippingPrice: buyboxData.standardShippingPrice || buyboxData.shippingPrice,
+          standardShippingPrice: buyboxData.standardShippingPrice || buyboxData.shippingPrice,
+          expressShippingPrice: buyboxData.expressShippingPrice
+        }],
+        marketplace: sourceMarketplace,
+        updatedAt: new Date().toISOString()
+      };
+      return { success: true, shippingData, sellersData, error: null };
+    } catch (error) {
+      console.error(`❌ [Seller Playwright] getSellerInfoFromPage hatası:`, error.message);
+      return { success: false, shippingData: null, sellersData: null, error: error.message };
+    }
+  }
+
+  /**
+   * Tek ASIN işle (PDP'ye git, shipping+seller çek) — batch için
+   */
+  async processASINWithPage(asin, sourceMarketplace, targetCountryCode, productId, authToken, assignedPage) {
+    try {
+      const marketplaceDomain = {
+        'amazon.com': 'www.amazon.com', 'amazon.co.uk': 'www.amazon.co.uk', 'amazon.de': 'www.amazon.de',
+        'amazon.es': 'www.amazon.es', 'amazon.it': 'www.amazon.it', 'amazon.fr': 'www.amazon.fr',
+        'amazon.co.jp': 'www.amazon.co.jp', 'amazon.ca': 'www.amazon.ca', 'amazon.com.au': 'www.amazon.com.au'
+      };
+      const baseDomain = marketplaceDomain[sourceMarketplace] || 'www.amazon.com';
+      const asinUrl = `https://${baseDomain}/dp/${asin}?th=1`;
+      let page = assignedPage;
+      if (!page || page.isClosed()) {
+        const pages = await this.getPagePool(sourceMarketplace, targetCountryCode);
+        const key = this.getContextKey(sourceMarketplace, targetCountryCode);
+        page = this.getNextPage(pages, key);
+      }
+      await page.goto(asinUrl, { waitUntil: 'domcontentloaded', timeout: 25000 });
+      await this.safeWait(page, 1500);
+      try {
+        await page.waitForSelector('#desktop_buybox, #buybox, #qualifiedBuybox, #apex_offerDisplay_single_desktop, #apex_offerDisplay_desktop', { timeout: 10000, state: 'attached' }).catch(() => null);
+      } catch (e) { /* continue */ }
+      await this.safeWait(page, 1000);
+      const result = await this.getSellerInfoFromPage(page, asin, sourceMarketplace, targetCountryCode);
+      return {
+        asin,
+        productId: productId || null,
+        success: result.success,
+        shippingData: result.shippingData,
+        sellersData: result.sellersData,
+        error: result.error
+      };
+    } catch (error) {
+      console.error(`❌ [Seller Playwright] ${asin} işlenirken hata:`, error.message);
+      return { asin, productId: productId || null, success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Envanter güncellemesi batch: Tarayıcı bir kere, ülke seçimi, 20 sekme, ASIN'ler paralel
+   * vixify-playwright-service-batch mantığı — maliyet düşürme
+   */
+  async processBatchInventoryUpdate(asins, sourceMarketplace, targetCountryCode, productIds, authToken) {
+    const key = this.getContextKey(sourceMarketplace, targetCountryCode);
+    console.log(`📦 [Seller Playwright] processBatchInventoryUpdate: ${asins.length} ASIN | ${sourceMarketplace} | ${targetCountryCode}`);
+    try {
+      await this.getBrowser();
+      await this.getOrCreateContext(sourceMarketplace, targetCountryCode);
+      const pages = await this.getPagePool(sourceMarketplace, targetCountryCode);
+      if (!pages || pages.length === 0) throw new Error('Page pool oluşturulamadı');
+      console.log(`✅ [Seller Playwright] ${pages.length} sekme hazır`);
+
+      const results = [];
+      const batchSize = 20;
+      for (let i = 0; i < asins.length; i += batchSize) {
+        const batch = asins.slice(i, i + batchSize);
+        const batchProductIds = productIds ? productIds.slice(i, i + batchSize) : null;
+        const validPages = pages.filter(p => p && !p.isClosed());
+        const assignedPages = batch.map((_, j) => validPages[j % validPages.length] || pages[j % pages.length]);
+        const batchPromises = batch.map((asin, j) => {
+          const productId = batchProductIds ? batchProductIds[j] : null;
+          return this.processASINWithPage(asin, sourceMarketplace, targetCountryCode, productId, authToken, assignedPages[j]);
+        });
+        const batchResults = await Promise.all(batchPromises);
+        results.push(...batchResults);
+        console.log(`✅ [Seller Playwright] Batch ${Math.floor(i / batchSize) + 1}: ${batchResults.filter(r => r.success).length} başarılı`);
+        if (i + batchSize < asins.length) await new Promise(r => setTimeout(r, 1000));
+      }
+
+      return results;
+    } catch (error) {
+      console.error(`❌ [Seller Playwright] processBatchInventoryUpdate hatası:`, error.message);
+      throw error;
+    } finally {
+      await this.closeBrowserAfterBatch();
+    }
+  }
 }
 
 module.exports = new PlaywrightService();
