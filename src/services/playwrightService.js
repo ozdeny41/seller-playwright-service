@@ -3878,41 +3878,54 @@ class PlaywrightService {
   }
 
   /**
-   * Tek ASIN işle (PDP'ye git, shipping+seller çek) — batch için
+   * Tek ASIN işle — AOD sayfasından shipping + seller (rating dahil) çek.
+   * KRİTİK: PDP yerine AOD kullanılıyor — satıcı değerlendirmesi (rating) AOD'da mevcut.
    */
   async processASINWithPage(asin, sourceMarketplace, targetCountryCode, productId, authToken, assignedPage) {
     try {
-      const marketplaceDomain = {
-        'amazon.com': 'www.amazon.com', 'amazon.co.uk': 'www.amazon.co.uk', 'amazon.de': 'www.amazon.de',
-        'amazon.es': 'www.amazon.es', 'amazon.it': 'www.amazon.it', 'amazon.fr': 'www.amazon.fr',
-        'amazon.co.jp': 'www.amazon.co.jp', 'amazon.ca': 'www.amazon.ca', 'amazon.com.au': 'www.amazon.com.au'
-      };
-      const baseDomain = marketplaceDomain[sourceMarketplace] || 'www.amazon.com';
-      const asinUrl = `https://${baseDomain}/dp/${asin}?th=1`;
       let page = assignedPage;
       if (!page || page.isClosed()) {
         const pages = await this.getPagePool(sourceMarketplace, targetCountryCode);
         const key = this.getContextKey(sourceMarketplace, targetCountryCode);
         page = this.getNextPage(pages, key);
       }
-      await page.goto(asinUrl, { waitUntil: 'domcontentloaded', timeout: 25000 });
-      await this.safeWait(page, 1500);
-      try {
-        await page.waitForSelector('#desktop_buybox, #buybox, #qualifiedBuybox, #apex_offerDisplay_single_desktop, #apex_offerDisplay_desktop', { timeout: 10000, state: 'attached' }).catch(() => null);
-      } catch (e) { /* continue */ }
-      await this.safeWait(page, 1000);
-      const result = await this.getSellerInfoFromPage(page, asin, sourceMarketplace, targetCountryCode);
+      // KRİTİK: getSellerInfo AOD'a gider ve rating'li tam satıcı listesini çeker (PDP buybox'ta rating yok)
+      const result = await this.getSellerInfo(asin, sourceMarketplace, targetCountryCode, { sharedPage: page });
+      if (!result.success || !result.data) {
+        return {
+          asin,
+          productId: productId || null,
+          success: false,
+          shippingData: null,
+          sellersData: null,
+          error: result.error || 'Seller bilgisi çekilemedi'
+        };
+      }
+      const sellers = result.data.sellers || [];
+      const buybox = result.data.buybox || sellers[0] || null;
+      const shippingData = buybox ? {
+        standardShippingPrice: buybox.standardShippingPrice ?? buybox.shippingPrice ?? null,
+        expressShippingPrice: buybox.expressShippingPrice ?? null,
+        standardDeliveryDateText: buybox.standardDeliveryDateText ?? buybox.standardDeliveryDate ?? buybox.deliveryDate ?? null,
+        expressDeliveryDateText: buybox.expressDeliveryDateText ?? buybox.expressDeliveryDate ?? null,
+        productPrice: (typeof buybox.price === 'number' && buybox.price > 0) ? buybox.price : null
+      } : null;
+      const sellersData = sellers.length > 0 ? {
+        sellers,
+        marketplace: sourceMarketplace,
+        updatedAt: new Date().toISOString()
+      } : null;
       return {
         asin,
         productId: productId || null,
-        success: result.success,
-        shippingData: result.shippingData,
-        sellersData: result.sellersData,
-        error: result.error
+        success: true,
+        shippingData,
+        sellersData,
+        error: null
       };
     } catch (error) {
       console.error(`❌ [Seller Playwright] ${asin} işlenirken hata:`, error.message);
-      return { asin, productId: productId || null, success: false, error: error.message };
+      return { asin, productId: productId || null, success: false, shippingData: null, sellersData: null, error: error.message };
     }
   }
 
