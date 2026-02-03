@@ -2104,15 +2104,24 @@ class PlaywrightService {
       // Buybox objesi oluştur - shipping bilgileri olsa da olmasa da döndür
       // KRİTİK: sellerName veya price yoksa bile, shipping bilgileri varsa döndür
       if (sellerName || price || shippingPrice || standardDeliveryDate || expressDeliveryDate) {
+        // KRİTİK: Amazon'un HTML/CSS/JavaScript kodlarını temizle
+        const cleanBuyboxPriceText = this.cleanAmazonHtml(priceText || (price ? `$${price.toFixed(2)}` : null) || '');
+        const cleanBuyboxSellerName = this.cleanAmazonHtml(sellerName || '');
+        const cleanBuyboxSoldBy = this.cleanAmazonHtml(soldBy || sellerName || '');
+        const cleanBuyboxShipsFrom = this.cleanAmazonHtml(shipsFrom || '');
+        const cleanBuyboxShippingText = this.cleanAmazonHtml(shippingText || '');
+        const cleanBuyboxStandardDeliveryDate = this.cleanAmazonHtml(standardDeliveryDate || '');
+        const cleanBuyboxExpressDeliveryDate = this.cleanAmazonHtml(expressDeliveryDate || '');
+        
         return {
-          sellerName: sellerName || null,
-          soldBy: soldBy || sellerName || null,
-          shipsFrom: shipsFrom || null,
+          sellerName: cleanBuyboxSellerName || null,
+          soldBy: cleanBuyboxSoldBy || null,
+          shipsFrom: cleanBuyboxShipsFrom || null,
           condition: condition,
           isNew: isNew,
           isUsed: isUsed,
           price: price,
-          priceText: priceText || (price ? `$${price.toFixed(2)}` : null),
+          priceText: cleanBuyboxPriceText || null,
           // KRİTİK: Fulfillment Type (FBA/FBM/SBA)
           fulfillmentType: fulfillmentType,
           isFBA: isFBA,
@@ -2122,11 +2131,11 @@ class PlaywrightService {
           shippingPrice: shippingPrice,
           standardShippingPrice: shippingPrice, // Standard shipping price
           expressShippingPrice: null, // Express shipping price (buybox için genellikle yok)
-          shippingText: shippingText || null,
+          shippingText: cleanBuyboxShippingText || null,
           // KRİTİK: Teslimat tarihleri
-          deliveryDate: standardDeliveryDate, // Geriye dönük uyumluluk
-          standardDeliveryDate: standardDeliveryDate,
-          expressDeliveryDate: expressDeliveryDate,
+          deliveryDate: cleanBuyboxStandardDeliveryDate || null, // Geriye dönük uyumluluk
+          standardDeliveryDate: cleanBuyboxStandardDeliveryDate || null,
+          expressDeliveryDate: cleanBuyboxExpressDeliveryDate || null,
           // KRİTİK: Satıcı değerlendirme bilgileri (buybox için genellikle yok ama field'ları ekle)
           sellerRating: null, // Buybox'ta satıcı rating genellikle gösterilmiyor
           sellerRatingCount: null,
