@@ -3865,10 +3865,10 @@ class PlaywrightService {
         });
       }
       
-      // KRİTİK: Sadece tamamen aynı olan offer'ları filtrele (sellerName + price + condition)
-      // Farklı condition'lardaki offer'ları göster (New vs Used - Very Good farklı satırlar olmalı)
-      // NOT: canonicalSellerName kullanma - çünkü tüm Amazon satıcılarını "amazon" yapıyor ve farklı satıcıları aynı görüyor
-      let finalSellers = uniqueSellers.length > 0 ? uniqueSellers : sellersWithoutDuplicateBuybox;
+      // KRİTİK: uniqueSellers KULLANMA - aynı satıcı adına sahip tüm offer'ları tek satıcıda birleştiriyor
+      // Örn: 9 offer (New, Used - Very Good, vb.) hepsi "Amazon" -> uniqueSellers sadece 1 satıcı döndürüyor
+      // Tüm offer'ları göster (sellersWithoutDuplicateBuybox), sadece tam duplicate'leri filtrele
+      let finalSellers = sellersWithoutDuplicateBuybox;
       const seenOfferKey = new Set();
       const nameKeyFor = (s, fallback) => {
         // Normalize et ama canonicalSellerName kullanma - sadece lowercase ve trim yap
