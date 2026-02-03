@@ -3839,24 +3839,29 @@ class PlaywrightService {
       const priceValFor = (s) => (s.price != null && !Number.isNaN(Number(s.price)) ? Number(s.price).toFixed(2) : 'noprice');
       
       // KRİTİK: Buybox satıcısını tekrar göstermemek için - sidebar'daki diğer satıcılardan buybox satıcısını çıkar
-      // Buybox satıcısı zaten birinci satıcı olarak gösteriliyor, sidebar'daki listede (pinned offer hariç) buybox satıcısı tekrar gösterilmemeli
-      // NOT: Pinned offer buybox satıcısı olabilir ama o zaten buybox olarak gösteriliyor, listede tekrar gösterilmemeli
+      // Buybox satıcısı zaten birinci satıcı olarak gösteriliyor, sidebar'daki listede buybox satıcısı tekrar gösterilmemeli
+      // NOT: Normalize etmeden tam eşleşme kullan - çünkü canonicalSellerName tüm Amazon satıcılarını "amazon" yapıyor
       let sellersWithoutDuplicateBuybox = sellers;
       if (buyboxData && sellers.length > 0) {
-        const buyboxSellerName = canonicalSellerName(buyboxData.sellerName || buyboxData.soldBy || '');
-        const buyboxSoldBy = canonicalSellerName(buyboxData.soldBy || buyboxData.sellerName || '');
+        const buyboxSellerName = (buyboxData.sellerName || buyboxData.soldBy || '').toLowerCase().trim();
+        const buyboxSoldBy = (buyboxData.soldBy || buyboxData.sellerName || '').toLowerCase().trim();
         
-        // Tüm satıcılardan buybox satıcısını çıkar (pinned offer dahil - çünkü buybox zaten ayrı gösteriliyor)
-        sellersWithoutDuplicateBuybox = sellers.filter((seller) => {
-          const sellerNameNorm = canonicalSellerName(seller.sellerName || '');
-          const sellerSoldByNorm = canonicalSellerName(seller.soldBy || '');
-          const isSameAsBuybox = (buyboxSellerName && (sellerNameNorm === buyboxSellerName || sellerSoldByNorm === buyboxSellerName)) ||
-                                 (buyboxSoldBy && (sellerNameNorm === buyboxSoldBy || sellerSoldByNorm === buyboxSoldBy));
-          if (isSameAsBuybox) {
-            console.log(`🔍 [Playwright] Buybox satıcısı listeden çıkarılıyor (tekrar gösterilmeyecek): ${seller.sellerName || seller.soldBy}`);
-            return false; // Buybox satıcısını listeden çıkar
+        // Sadece pinned offer'ı (ilk satıcı) kontrol et - eğer buybox satıcısı ile tam olarak aynıysa çıkar
+        // Diğer satıcıları çıkarma - çünkü farklı condition'larda aynı satıcı olabilir
+        sellersWithoutDuplicateBuybox = sellers.filter((seller, idx) => {
+          // Sadece ilk satıcıyı (pinned offer) kontrol et
+          if (idx === 0 && seller.isBuybox) {
+            const sellerName = (seller.sellerName || '').toLowerCase().trim();
+            const sellerSoldBy = (seller.soldBy || '').toLowerCase().trim();
+            // Tam eşleşme kontrolü (normalize etmeden)
+            const isSameAsBuybox = (buyboxSellerName && (sellerName === buyboxSellerName || sellerSoldBy === buyboxSellerName)) ||
+                                   (buyboxSoldBy && (sellerName === buyboxSoldBy || sellerSoldBy === buyboxSoldBy));
+            if (isSameAsBuybox) {
+              console.log(`🔍 [Playwright] Pinned offer buybox satıcısı ile aynı, listeden çıkarılıyor: ${seller.sellerName || seller.soldBy}`);
+              return false; // Pinned offer buybox satıcısı ise listeden çıkar
+            }
           }
-          return true;
+          return true; // Diğer tüm satıcıları göster
         });
       }
       
