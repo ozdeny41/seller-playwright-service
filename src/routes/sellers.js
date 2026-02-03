@@ -91,7 +91,17 @@ const requestQueue = new RequestQueue(2);
  * Get seller information for a product using Playwright
  */
 router.post('/', async (req, res, next) => {
+  const requestStartTime = Date.now();
   try {
+    console.log(`📥 [Playwright Service] ========== POST /api/sellers REQUEST BAŞLADI ==========`);
+    console.log(`📥 [Playwright Service] Request headers:`, {
+      'content-type': req.headers['content-type'],
+      'user-agent': req.headers['user-agent'],
+      origin: req.headers.origin,
+      referer: req.headers.referer
+    });
+    console.log(`📥 [Playwright Service] Request body:`, JSON.stringify(req.body, null, 2));
+    
     const { asin, asins, sourceMarketplace = 'amazon.com', targetCountry } = req.body;
     const asinList = Array.isArray(asins)
       ? asins.map(a => String(a || '').trim()).filter(Boolean)
@@ -103,7 +113,8 @@ router.post('/', async (req, res, next) => {
       sourceMarketplace: sourceMarketplace,
       targetCountry: targetCountry,
       bodyKeys: Object.keys(req.body),
-      hasAsin: asinList.length > 0
+      hasAsin: asinList.length > 0,
+      asinList: asinList
     });
     
     if (asinList.length === 0) {
@@ -146,6 +157,9 @@ router.post('/', async (req, res, next) => {
     
     if (!result || typeof result !== 'object') {
       console.error(`❌ [Playwright Service] Servis yanıtı geçersiz (result: ${typeof result})`);
+      const requestDuration = Date.now() - requestStartTime;
+      console.log(`⏱️ [Playwright Service] Request süresi: ${requestDuration}ms`);
+      console.log(`📥 [Playwright Service] ========== POST /api/sellers REQUEST TAMAMLANDI (HATA) ==========`);
       return res.status(500).json({ ok: false, error: 'No response from seller service' });
     }
     console.log(`📤 [Playwright Service] Seller info response hazırlanıyor:`, {
@@ -155,16 +169,24 @@ router.post('/', async (req, res, next) => {
       itemsCount: result.data?.items?.length || 0,
       error: result.error || null
     });
+    const requestDuration = Date.now() - requestStartTime;
+    console.log(`⏱️ [Playwright Service] Request süresi: ${requestDuration}ms`);
     if (result.success) {
+      console.log(`✅ [Playwright Service] ========== POST /api/sellers REQUEST BAŞARILI ==========`);
       res.json({ ok: true, data: result.data });
     } else {
+      console.log(`❌ [Playwright Service] ========== POST /api/sellers REQUEST BAŞARISIZ ==========`);
       res.status(result.status || 500).json({ 
         ok: false, 
         error: result.error || 'Failed to get seller information' 
       });
     }
   } catch (error) {
+    const requestDuration = Date.now() - requestStartTime;
     console.error(`❌ [Playwright Service] Seller info error:`, error.message);
+    console.error(`❌ [Playwright Service] Error stack:`, error.stack);
+    console.log(`⏱️ [Playwright Service] Request süresi (hata): ${requestDuration}ms`);
+    console.log(`📥 [Playwright Service] ========== POST /api/sellers REQUEST HATA İLE TAMAMLANDI ==========`);
     next(error);
   }
 });
