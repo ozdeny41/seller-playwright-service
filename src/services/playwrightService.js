@@ -3867,11 +3867,13 @@ class PlaywrightService {
       
       // KRİTİK: Sadece tamamen aynı olan offer'ları filtrele (sellerName + price + condition)
       // Farklı condition'lardaki offer'ları göster (New vs Used - Very Good farklı satırlar olmalı)
+      // NOT: canonicalSellerName kullanma - çünkü tüm Amazon satıcılarını "amazon" yapıyor ve farklı satıcıları aynı görüyor
       let finalSellers = uniqueSellers.length > 0 ? uniqueSellers : sellersWithoutDuplicateBuybox;
       const seenOfferKey = new Set();
       const nameKeyFor = (s, fallback) => {
-        const a = canonicalSellerName(s.sellerName || '');
-        const b = canonicalSellerName(s.soldBy || '');
+        // Normalize et ama canonicalSellerName kullanma - sadece lowercase ve trim yap
+        const a = (s.sellerName || '').toLowerCase().trim().replace(/\s+/g, ' ');
+        const b = (s.soldBy || '').toLowerCase().trim().replace(/\s+/g, ' ');
         const nameNorm = a || b || '';
         return nameNorm && nameNorm.length >= 2 ? nameNorm : (fallback != null ? fallback : `idx-${s.index ?? seenOfferKey.size}`);
       };
