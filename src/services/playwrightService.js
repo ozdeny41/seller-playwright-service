@@ -56,6 +56,24 @@ class PlaywrightService {
     return `${sourceMarketplace}_${targetCountryCode || 'default'}`;
   }
 
+  /**
+   * "Target page, context or browser has been closed" hatası geldiğinde state temizle.
+   * Eşzamanlı isteklerde batch tarayıcıyı kapatırken diğer istek kapalı browser kullanmaya çalışabilir.
+   */
+  clearBrowserStateOnClosedError(err) {
+    if (err && err.message && (String(err.message).includes('closed') || String(err.message).includes('Target'))) {
+      console.warn('⚠️ [Seller Playwright] Browser/context kapalı tespit edildi, state temizleniyor...');
+      this.browser = null;
+      this.browserLaunchPromise = null;
+      this.contexts.clear();
+      this.contextSetupStatus.clear();
+      this.pagePools.clear();
+      this.pagePoolIndex.clear();
+      return true;
+    }
+    return false;
+  }
+
   async getBrowser() {
     const globalInstall = global.__browserInstallationPromise;
     if (globalInstall) {
@@ -107,42 +125,53 @@ class PlaywrightService {
       this.pagePools.delete(key);
       this.pagePoolIndex.delete(key);
     }
-    const browser = await this.getBrowser();
-    console.log(`📄 [Seller Playwright] Context oluşturuluyor: ${key}`);
-    const context = await browser.newContext({
-      viewport: { width: 1920, height: 1080 },
-      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      locale: 'en-US',
-      timezoneId: 'America/New_York'
-    });
-    const marketplaceDomain = { 'amazon.com': 'www.amazon.com', 'amazon.co.uk': 'www.amazon.co.uk', 'amazon.de': 'www.amazon.de', 'amazon.es': 'www.amazon.es', 'amazon.it': 'www.amazon.it', 'amazon.fr': 'www.amazon.fr', 'amazon.co.jp': 'www.amazon.co.jp' };
-    const baseUrl = `https://${marketplaceDomain[sourceMarketplace] || 'www.amazon.com'}`;
 
-    // KRİTİK: targetCountry yoksa setup atla — direkt AOD'a gidilecek, Amazon ana sayfa yüklemesi gereksiz (timeout/captcha riski)
-    if (!targetCountryCode) {
-      console.log(`⚡ [Seller Playwright] targetCountry yok, setup atlanıyor — direkt AOD kullanılacak`);
-    } else {
-      const setupPage = await context.newPage();
-      console.log(`🌐 [Seller Playwright] Setup sayfası açılıyor: ${baseUrl}`);
+    for (let attempt = 1; attempt <= 2; attempt++) {
       try {
-        await setupPage.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 25000 });
-        console.log(`✅ [Seller Playwright] Setup sayfası yüklendi`);
-      } catch (gotoErr) {
-        console.error(`❌ [Seller Playwright] Setup sayfası yükleme hatası: ${gotoErr.message}`);
-        await setupPage.close().catch(() => {});
-        throw gotoErr;
+        const browser = await this.getBrowser();
+        console.log(`📄 [Seller Playwright] Context oluşturuluyor: ${key}${attempt > 1 ? ` (retry ${attempt}/2)` : ''}`);
+        const context = await browser.newContext({
+          viewport: { width: 1920, height: 1080 },
+          userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          locale: 'en-US',
+          timezoneId: 'America/New_York'
+        });
+        const marketplaceDomain = { 'amazon.com': 'www.amazon.com', 'amazon.co.uk': 'www.amazon.co.uk', 'amazon.de': 'www.amazon.de', 'amazon.es': 'www.amazon.es', 'amazon.it': 'www.amazon.it', 'amazon.fr': 'www.amazon.fr', 'amazon.co.jp': 'www.amazon.co.jp' };
+        const baseUrl = `https://${marketplaceDomain[sourceMarketplace] || 'www.amazon.com'}`;
+
+        // KRİTİK: targetCountry yoksa setup atla — direkt AOD'a gidilecek, Amazon ana sayfa yüklemesi gereksiz (timeout/captcha riski)
+        if (!targetCountryCode) {
+          console.log(`⚡ [Seller Playwright] targetCountry yok, setup atlanıyor — direkt AOD kullanılacak`);
+        } else {
+          const setupPage = await context.newPage();
+          console.log(`🌐 [Seller Playwright] Setup sayfası açılıyor: ${baseUrl}`);
+          try {
+            await setupPage.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 25000 });
+            console.log(`✅ [Seller Playwright] Setup sayfası yüklendi`);
+          } catch (gotoErr) {
+            console.error(`❌ [Seller Playwright] Setup sayfası yükleme hatası: ${gotoErr.message}`);
+            await setupPage.close().catch(() => {});
+            throw gotoErr;
+          }
+          await this.safeWait(setupPage, 2000);
+          console.log(`🌍 [Seller Playwright] Ülke ve para birimi seçimi başlatılıyor: ${targetCountryCode}`);
+          const res = await this.selectCountryAndCurrency(setupPage, targetCountryCode, sourceMarketplace, baseUrl);
+          if (!res.success) console.warn('⚠️ [Seller Playwright] Context ülke seçimi başarısız:', res.error);
+          else console.log(`✅ [Seller Playwright] Ülke/para birimi seçimi tamamlandı`);
+          await setupPage.close().catch(() => {});
+        }
+        this.contexts.set(key, context);
+        this.contextSetupStatus.set(key, true);
+        console.log(`✅ [Seller Playwright] Yeni context: ${key}`);
+        return context;
+      } catch (err) {
+        if (this.clearBrowserStateOnClosedError(err) && attempt < 2) {
+          console.log(`🔄 [Seller Playwright] Context oluşturma hatası (closed), yeniden deneniyor...`);
+          continue;
+        }
+        throw err;
       }
-      await this.safeWait(setupPage, 2000);
-      console.log(`🌍 [Seller Playwright] Ülke ve para birimi seçimi başlatılıyor: ${targetCountryCode}`);
-      const res = await this.selectCountryAndCurrency(setupPage, targetCountryCode, sourceMarketplace, baseUrl);
-      if (!res.success) console.warn('⚠️ [Seller Playwright] Context ülke seçimi başarısız:', res.error);
-      else console.log(`✅ [Seller Playwright] Ülke/para birimi seçimi tamamlandı`);
-      await setupPage.close().catch(() => {});
     }
-    this.contexts.set(key, context);
-    this.contextSetupStatus.set(key, true);
-    console.log(`✅ [Seller Playwright] Yeni context: ${key}`);
-    return context;
   }
 
   async getPagePool(sourceMarketplace, targetCountryCode) {
@@ -155,15 +184,26 @@ class PlaywrightService {
       }
       (this.pagePools.get(key) || []).forEach(p => p.close().catch(() => {}));
     }
-    const ctx = await this.getOrCreateContext(sourceMarketplace, targetCountryCode);
-    const pages = [];
-    for (let i = 0; i < this.pagePoolSize; i++) {
-      pages.push(await ctx.newPage());
+
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        const ctx = await this.getOrCreateContext(sourceMarketplace, targetCountryCode);
+        const pages = [];
+        for (let i = 0; i < this.pagePoolSize; i++) {
+          pages.push(await ctx.newPage());
+        }
+        this.pagePools.set(key, pages);
+        this.pagePoolIndex.set(key, 0);
+        console.log(`✅ [Seller Playwright] ${this.pagePoolSize} sekme açıldı: ${key}`);
+        return pages;
+      } catch (err) {
+        if (this.clearBrowserStateOnClosedError(err) && attempt < 2) {
+          console.log(`🔄 [Seller Playwright] Page pool hatası (closed), yeniden deneniyor...`);
+          continue;
+        }
+        throw err;
+      }
     }
-    this.pagePools.set(key, pages);
-    this.pagePoolIndex.set(key, 0);
-    console.log(`✅ [Seller Playwright] ${this.pagePoolSize} sekme açıldı: ${key}`);
-    return pages;
   }
 
   getNextPage(pages, key) {
