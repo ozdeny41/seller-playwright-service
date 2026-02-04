@@ -2196,7 +2196,8 @@ class PlaywrightService {
         // "Used - Like New", "New", "Used - Very Good" gibi pattern'leri ara
         const conditionMatch = offerText.match(/(New|Used\s*-\s*(?:Like\s+New|Very\s+Good|Good|Acceptable)|Used)/i);
         if (conditionMatch) {
-          condition = conditionMatch[1].trim();
+          // KRİTİK: Condition stringini temizle - fazla boşluk ve newline'ları kaldır
+          condition = conditionMatch[1].replace(/\s+/g, ' ').trim();
           console.log(`✅ [Playwright] Offer ${index} condition offer element'inden çekildi: ${condition}`);
         }
         
@@ -2206,8 +2207,10 @@ class PlaywrightService {
             try {
               const conditionElement = await page.$('#aod-offer-heading > span.a-size-base.a-text-bold').catch(() => null);
               if (conditionElement) {
-                condition = await conditionElement.textContent().then(t => t.trim()).catch(() => null);
-                if (condition) {
+                let rawCondition = await conditionElement.textContent().then(t => t.trim()).catch(() => null);
+                if (rawCondition) {
+                  // KRİTİK: Condition stringini temizle - fazla boşluk ve newline'ları kaldır
+                  condition = rawCondition.replace(/\s+/g, ' ').trim();
                   console.log(`✅ [Playwright] Offer ${index} condition sidebar'dan çekildi: ${condition}`);
                 }
               }
@@ -2219,8 +2222,10 @@ class PlaywrightService {
             try {
               const conditionElement = await offerElement.$('span#aod-condition-text, span.a-color-state, #aod-offer-heading span.a-size-base.a-text-bold').catch(() => null);
               if (conditionElement) {
-                condition = await conditionElement.textContent().then(t => t.trim()).catch(() => null);
-                if (condition) {
+                let rawCondition = await conditionElement.textContent().then(t => t.trim()).catch(() => null);
+                if (rawCondition) {
+                  // KRİTİK: Condition stringini temizle - fazla boşluk ve newline'ları kaldır
+                  condition = rawCondition.replace(/\s+/g, ' ').trim();
                   console.log(`✅ [Playwright] Offer ${index} condition sidebar'dan çekildi: ${condition}`);
                 }
               }
@@ -2268,57 +2273,103 @@ class PlaywrightService {
       try {
         // KRİTİK: Önce offer element içinden price'ı bul
         // "$179.99", "$179 . 99" gibi pattern'leri ara
-        const priceMatch = offerText.match(/[\$£€]\s*([\d,]+\.?\d*)/);
+        // Para birimi sembolü ZORUNLU - CSS/URL'den gelen sayıları filtrele
+        const priceMatch = offerText.match(/[\$£€]\s*([\d,]+(?:\.\d{1,2})?)/);
         if (priceMatch) {
-          price = parseFloat(priceMatch[1].replace(/,/g, ''));
-          priceText = priceMatch[0].trim();
-          console.log(`✅ [Playwright] Offer ${index} price offer element'inden çekildi: ${priceText} -> ${price}`);
+          const parsedPrice = parseFloat(priceMatch[1].replace(/,/g, ''));
+          // Fiyat validasyonu: 0.01 - 9999 arası makul fiyat
+          if (parsedPrice > 0 && parsedPrice < 10000) {
+            price = parsedPrice;
+            priceText = priceMatch[0].trim();
+            console.log(`✅ [Playwright] Offer ${index} price offer element'inden çekildi: ${priceText} -> ${price}`);
+          } else {
+            console.warn(`⚠️ [Playwright] Offer ${index} price regex match (${parsedPrice}) çok yüksek veya düşük, atlanıyor`);
+          }
         }
         
         // Eğer bulunamadıysa: liste satırından #aod-price-{index} veya sidebar'dan çek
         if (!price && !priceText) {
+          // KRİTİK: Pinned offer için sadece #aod-price-0, diğerleri için sadece kendi index'i
+          // #aod-price-0 diğer offer'lar için KULLANILMAMALI - her zaman pinned offer fiyatını döndürür
           if (!isPinnedOffer) {
             try {
-              const rowPriceEl = await offerElement.$(`#aod-price-${index}`).catch(() => null);
-              if (rowPriceEl) {
-                const raw = await rowPriceEl.textContent().then(t => t.trim()).catch(() => null);
-                if (raw) {
-                  const cleaned = raw.replace(/\s+/g, '');
-                  const priceMatch = cleaned.match(/[\$£€]?([\d,]+\.?\d*)/);
-                  if (priceMatch) {
-                    price = parseFloat(priceMatch[1].replace(/,/g, ''));
-                    priceText = raw;
-                    console.log(`✅ [Playwright] Offer ${index} price satır #aod-price-${index} çekildi: ${price}`);
+              // Önce offer element içinden fiyat elementini bul
+              const offerPriceSelectors = [
+                '.a-price .a-offscreen',
+                'span.a-price-whole',
+                '.a-price span[aria-hidden="true"]'
+              ];
+              for (const sel of offerPriceSelectors) {
+                try {
+                  const priceEl = await offerElement.$(sel).catch(() => null);
+                  if (priceEl) {
+                    const raw = await priceEl.textContent().then(t => t.trim()).catch(() => null);
+                    if (raw) {
+                      // Para birimi sembolü zorunlu - CSS/URL'den gelen sayıları filtrele
+                      const priceMatchWithCurrency = raw.match(/[\$£€]\s*([\d,]+(?:\.\d{1,2})?)/);
+                      if (priceMatchWithCurrency) {
+                        const parsedPrice = parseFloat(priceMatchWithCurrency[1].replace(/,/g, ''));
+                        // Fiyat validasyonu: 0.01 - 9999 arası makul fiyat
+                        if (parsedPrice > 0 && parsedPrice < 10000) {
+                          price = parsedPrice;
+                          priceText = raw;
+                          console.log(`✅ [Playwright] Offer ${index} price offer element'inden (${sel}): ${price}`);
+                          break;
+                        }
+                      }
+                    }
+                  }
+                } catch (e) { /* next selector */ }
+              }
+              
+              // Eğer hala bulunamadıysa, index'li selector dene
+              if (!price) {
+                const rowPriceEl = await page.$(`#aod-price-${index} span[aria-hidden="true"], #aod-price-${index} .a-offscreen`).catch(() => null);
+                if (rowPriceEl) {
+                  const raw = await rowPriceEl.textContent().then(t => t.trim()).catch(() => null);
+                  if (raw) {
+                    const priceMatchWithCurrency = raw.match(/[\$£€]\s*([\d,]+(?:\.\d{1,2})?)/);
+                    if (priceMatchWithCurrency) {
+                      const parsedPrice = parseFloat(priceMatchWithCurrency[1].replace(/,/g, ''));
+                      if (parsedPrice > 0 && parsedPrice < 10000) {
+                        price = parsedPrice;
+                        priceText = raw;
+                        console.log(`✅ [Playwright] Offer ${index} price #aod-price-${index} 'den çekildi: ${price}`);
+                      }
+                    }
                   }
                 }
               }
             } catch (e) { /* row price skip */ }
-          }
-          if (!price && !priceText) {
-            const sidebarSelectors = isPinnedOffer
-              ? ['#aod-price-0']
-              : ['#aod-price-0', `#aod-price-${index}`];
-            for (const sel of sidebarSelectors) {
-              try {
-                const priceElement = await page.$(`${sel} span[aria-hidden="true"], ${sel} .a-offscreen, ${sel}`).catch(() => null);
-                if (priceElement) {
-                  priceText = await priceElement.textContent().then(t => t.trim()).catch(() => null);
-                  if (priceText) {
-                    const cleanedPriceText = priceText.replace(/\s+/g, '');
-                    const priceMatch = cleanedPriceText.match(/[\$£€]?([\d,]+\.?\d*)/);
-                    if (priceMatch) {
-                      price = parseFloat(priceMatch[1].replace(/,/g, ''));
-                      console.log(`✅ [Playwright] Offer ${index} price sidebar (${sel}): ${price}`);
-                      break;
+          } else {
+            // Pinned offer için sadece #aod-price-0 kullan
+            try {
+              const priceElement = await page.$('#aod-price-0 span[aria-hidden="true"], #aod-price-0 .a-offscreen').catch(() => null);
+              if (priceElement) {
+                priceText = await priceElement.textContent().then(t => t.trim()).catch(() => null);
+                if (priceText) {
+                  const priceMatchWithCurrency = priceText.match(/[\$£€]\s*([\d,]+(?:\.\d{1,2})?)/);
+                  if (priceMatchWithCurrency) {
+                    const parsedPrice = parseFloat(priceMatchWithCurrency[1].replace(/,/g, ''));
+                    if (parsedPrice > 0 && parsedPrice < 10000) {
+                      price = parsedPrice;
+                      console.log(`✅ [Playwright] Offer ${index} price sidebar (#aod-price-0): ${price}`);
                     }
                   }
                 }
-              } catch (e) { /* next selector */ }
-            }
+              }
+            } catch (e) { /* sidebar price skip */ }
           }
           if (!price && !priceText) {
-            console.warn(`⚠️ [Playwright] Offer ${index} price çekilemedi`);
+            console.warn(`⚠️ [Playwright] Offer ${index} price sidebar'dan çekilemedi, offer element'e fallback`);
           }
+        }
+        
+        // KRİTİK: Fiyat validasyonu - 10000'den büyük fiyatlar muhtemelen CSS/URL'den geliyor
+        if (price && price >= 10000) {
+          console.warn(`⚠️ [Playwright] Offer ${index} price çok yüksek (${price}), muhtemelen hatalı - sıfırlanıyor`);
+          price = null;
+          priceText = null;
         }
         
         // Eğer hala bulunamadıysa, normal yöntemi kullan
