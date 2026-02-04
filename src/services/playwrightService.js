@@ -3649,19 +3649,57 @@ class PlaywrightService {
       try {
         const seeMoreLink = await page.$('#aod-pinned-offer-show-more-link').catch(() => null);
         if (seeMoreLink) {
-          console.log(`🔗 [Playwright] "See more" linki bulundu, tıklanıyor...`);
+          console.log(`🔗 [Playwright] Pinned offer "See more" linki bulundu, tıklanıyor...`);
           try {
             await seeMoreLink.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {});
             await this.safeWait(page, 500);
             await seeMoreLink.click({ timeout: 10000 });
-            console.log(`✅ [Playwright] "See more" linkine tıklandı`);
+            console.log(`✅ [Playwright] Pinned offer "See more" linkine tıklandı`);
             await this.safeWait(page, 2000); // Sidebar içeriğinin yüklenmesi için bekle
           } catch (clickError) {
-            console.warn(`⚠️ [Playwright] "See more" linkine tıklanamadı: ${clickError.message}`);
+            console.warn(`⚠️ [Playwright] Pinned offer "See more" linkine tıklanamadı: ${clickError.message}`);
           }
         }
       } catch (e) {
-        console.warn(`⚠️ [Playwright] "See more" linki kontrol edilemedi: ${e.message}`);
+        console.warn(`⚠️ [Playwright] Pinned offer "See more" linki kontrol edilemedi: ${e.message}`);
+      }
+
+      // KRİTİK: Tüm satıcıları görmek için "See more buying choices" butonuna tıkla
+      try {
+        // Farklı selector'lar ile ara
+        const seeMoreBuyingChoices = await page.$(
+          'a.a-link-normal[href*="buyingChoices"], ' +
+          'span.a-size-base.a-color-base[role="button"]:has-text("See more buying choices"), ' +
+          'div.a-section > a:has-text("See more buying choices"), ' +
+          '#aod-see-more-offers, ' +
+          '[data-cy="see-more-buying-choices"], ' +
+          'a[href*="all-offers-display"]'
+        ).catch(() => null);
+
+        if (seeMoreBuyingChoices) {
+          console.log(`🔗 [Playwright] "See more buying choices" butonu bulundu, tıklanıyor...`);
+          try {
+            await seeMoreBuyingChoices.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {});
+            await this.safeWait(page, 500);
+            await seeMoreBuyingChoices.click({ timeout: 15000 });
+            console.log(`✅ [Playwright] "See more buying choices" butonuna tıklandı`);
+            await this.safeWait(page, 3000); // Tüm satıcıların yüklenmesi için bekle
+
+            // Sayfa URL'si değişmiş olabilir, tekrar yükle
+            const currentUrl = page.url();
+            if (!currentUrl.includes('#all-offers-display')) {
+              console.log(`🔄 [Playwright] Sayfa URL'si değişti, tekrar yükleniyor...`);
+              await page.reload({ waitUntil: 'domcontentloaded', timeout: 20000 });
+              await this.safeWait(page, 2000);
+            }
+          } catch (clickError) {
+            console.warn(`⚠️ [Playwright] "See more buying choices" butonuna tıklanamadı: ${clickError.message}`);
+          }
+        } else {
+          console.log(`ℹ️ [Playwright] "See more buying choices" butonu bulunamadı - zaten tüm satıcılar görünüyor olabilir`);
+        }
+      } catch (e) {
+        console.warn(`⚠️ [Playwright] "See more buying choices" butonu kontrol edilemedi: ${e.message}`);
       }
 
       // KRİTİK: Scroll hedefi — totalSellers kadar liste satırı yükle (eğer totalSellers 8 ise 8 satıcı çekilmeli)

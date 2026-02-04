@@ -275,4 +275,19 @@ router.get('/:asin', async (req, res, next) => {
   }
 });
 
+// KRİTİK: Health check endpoint - kuyruk durumu için
+router.get('/health', (req, res) => {
+  const queueSize = requestQueue ? requestQueue.queue.length : 0;
+  const isHealthy = queueSize < 50; // 50'den fazla kuyruk varsa unhealthy
+
+  res.json({
+    status: isHealthy ? 'healthy' : 'busy',
+    queueSize,
+    running: requestQueue ? requestQueue.running : 0,
+    maxConcurrent: requestQueue ? requestQueue.maxConcurrent : 1,
+    lastEAGAIN: requestQueue ? new Date(requestQueue.lastEAGAINTime).toISOString() : null,
+    eagainCount: requestQueue ? requestQueue.eagainCount : 0
+  });
+});
+
 module.exports = router;
