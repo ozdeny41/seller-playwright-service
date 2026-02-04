@@ -3949,9 +3949,69 @@ class PlaywrightService {
       if (!finalTotalSellers || finalTotalSellers < finalSellers.length) {
         finalTotalSellers = finalSellers.length;
       }
+      
+      // KRİTİK: Import charge hesaplama - buyboxShippingWithImport parametresi varsa
+      // Bu değer ana sayfadaki buybox'tan çekilen shipping+import toplam fiyatı
+      // Pinned offer'ın sidebar'daki shipping fiyatı ile karşılaştırılarak import charge hesaplanır
+      const buyboxShippingWithImport = opts.buyboxShippingWithImport;
+      let calculatedImportCharge = null;
+      
+      if (buyboxShippingWithImport != null && !isNaN(buyboxShippingWithImport) && buyboxShippingWithImport > 0) {
+        // Pinned offer'ın (buybox satıcısı) sidebar'daki shipping fiyatını bul
+        const pinnedOffer = finalSellers.find(s => s.isBuybox === true);
+        const pinnedShipping = pinnedOffer?.standardShippingPrice || pinnedOffer?.shippingPrice || 0;
+        
+        if (pinnedShipping > 0 && buyboxShippingWithImport > pinnedShipping) {
+          // Import charge = Buybox'taki toplam - Sidebar'daki shipping
+          calculatedImportCharge = parseFloat((buyboxShippingWithImport - pinnedShipping).toFixed(2));
+          console.log(`💰 [Playwright] Import charge hesaplandı: $${calculatedImportCharge} (Buybox: $${buyboxShippingWithImport} - Sidebar: $${pinnedShipping})`);
+          
+          // KRİTİK: FBA ve SBA satıcılara import charge ekle, FBM satıcılara EKLEME
+          finalSellers = finalSellers.map(seller => {
+            // FBM satıcılara import charge ekleme - kendi shipping'lerini göster
+            if (seller.isFBM === true || seller.fulfillmentType === 'FBM') {
+              console.log(`📦 [Playwright] FBM satıcı, import charge eklenmedi: ${seller.sellerName || seller.soldBy}`);
+              return seller;
+            }
+            
+            // FBA veya SBA satıcılara import charge ekle
+            if (seller.isFBA === true || seller.isSBA === true || seller.fulfillmentType === 'FBA' || seller.fulfillmentType === 'SBA') {
+              const originalShipping = seller.standardShippingPrice || seller.shippingPrice || 0;
+              const totalShipping = parseFloat((originalShipping + calculatedImportCharge).toFixed(2));
+              
+              console.log(`📦 [Playwright] ${seller.fulfillmentType || 'FBA/SBA'} satıcıya import charge eklendi: ${seller.sellerName || seller.soldBy} - Shipping: $${originalShipping} + Import: $${calculatedImportCharge} = $${totalShipping}`);
+              
+              return {
+                ...seller,
+                // Original shipping değerlerini sakla
+                originalShippingPrice: originalShipping,
+                // Import charge eklenmiş toplam shipping
+                shippingPrice: totalShipping,
+                standardShippingPrice: totalShipping,
+                // Import charge bilgisi (frontend'de gösterilebilir)
+                importCharge: calculatedImportCharge,
+                shippingWithImport: totalShipping
+              };
+            }
+            
+            // Fulfillment type belirlenememiş satıcılar için shipping olduğu gibi bırak
+            console.log(`⚠️ [Playwright] Fulfillment type belirlenemedi, import charge eklenmedi: ${seller.sellerName || seller.soldBy}`);
+            return seller;
+          });
+        } else if (pinnedShipping <= 0) {
+          console.warn(`⚠️ [Playwright] Pinned offer shipping bulunamadı, import charge hesaplanamadı`);
+        } else {
+          console.log(`ℹ️ [Playwright] Import charge yok veya negatif (Buybox: $${buyboxShippingWithImport}, Sidebar: $${pinnedShipping})`);
+        }
+      } else if (buyboxShippingWithImport != null) {
+        console.log(`ℹ️ [Playwright] buyboxShippingWithImport geçersiz veya 0: ${buyboxShippingWithImport}`);
+      }
 
       // Log: ASIN başına kaç satıcı bulundu (Railway loglarında "ASIN B000WJIC3G" vb. aranabilir)
       console.log(`📊 [Playwright] ASIN ${asin} için ${finalSellers.length} satıcı bulundu (totalSellers: ${finalTotalSellers})`);
+      if (calculatedImportCharge != null) {
+        console.log(`💰 [Playwright] Import charge uygulandı: $${calculatedImportCharge} (FBA/SBA satıcılara)`);
+      }
       
       // KRİTİK: Seller'ların detaylarını logla
       if (finalSellers.length > 0) {
@@ -3983,7 +4043,10 @@ class PlaywrightService {
         totalSellers: finalTotalSellers,
         sellers: finalSellers,
         marketplace: 'source',
-        buybox: buyboxSeller
+        buybox: buyboxSeller,
+        // KRİTİK: Import charge bilgisi - FBA/SBA satıcılara uygulandı
+        importCharge: calculatedImportCharge,
+        buyboxShippingWithImport: buyboxShippingWithImport || null
       };
       
       console.log(`📤 [Playwright] ASIN ${asin} için response data hazırlanıyor:`, {

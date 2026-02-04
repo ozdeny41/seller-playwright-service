@@ -102,10 +102,17 @@ router.post('/', async (req, res, next) => {
     });
     console.log(`📥 [Playwright Service] Request body:`, JSON.stringify(req.body, null, 2));
     
-    const { asin, asins, sourceMarketplace = 'amazon.com', targetCountry } = req.body;
+    const { asin, asins, sourceMarketplace = 'amazon.com', targetCountry, buyboxShippingWithImport } = req.body;
     const asinList = Array.isArray(asins)
       ? asins.map(a => String(a || '').trim()).filter(Boolean)
       : (asin ? [String(asin).trim()].filter(Boolean) : []);
+    
+    // KRİTİK: buyboxShippingWithImport - Ana sayfadan çekilen shipping+import toplam fiyatı
+    // Bu değer varsa, import charge hesaplanıp FBA/SBA satıcılara uygulanacak
+    const parsedBuyboxShippingWithImport = buyboxShippingWithImport != null ? parseFloat(buyboxShippingWithImport) : null;
+    if (parsedBuyboxShippingWithImport != null) {
+      console.log(`💰 [Playwright Service] Buybox shipping+import alındı: $${parsedBuyboxShippingWithImport}`);
+    }
     
     console.log(`📥 [Playwright Service] POST /api/sellers request alındı:`, {
       asin: asin,
@@ -135,7 +142,8 @@ router.post('/', async (req, res, next) => {
         if (asinList.length > 1) {
           return await playwrightService.getSellerInfoBatch(asinList, sourceMarketplace, targetCountry);
         }
-        return await playwrightService.getSellerInfo(asinList[0], sourceMarketplace, targetCountry);
+        // KRİTİK: buyboxShippingWithImport parametresini geçir - import charge hesaplaması için
+        return await playwrightService.getSellerInfo(asinList[0], sourceMarketplace, targetCountry, { buyboxShippingWithImport: parsedBuyboxShippingWithImport });
       } catch (error) {
         const errorString = error.message || error.toString() || '';
         const isEAGAIN = error.isEAGAIN || 
