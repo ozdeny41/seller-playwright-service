@@ -2177,9 +2177,10 @@ class PlaywrightService {
    * @param {Object} offerElement - Playwright element handle for #aod-offer
    * @param {number} index - Offer index
    * @param {boolean} isPinnedOffer - Is this the pinned offer?
+   * @param {number|null} buyboxShippingPrice - Buybox shipping price (import charge dahil) - diğer satıcılar için fallback
    * @returns {Promise<Object | null>}
    */
-  async extractSellerDataFromOffer(page, offerElement, index, isPinnedOffer = false) {
+  async extractSellerDataFromOffer(page, offerElement, index, isPinnedOffer = false, buyboxShippingPrice = null) {
     try {
       // KRİTİK: Sidebar açıldıktan sonra offer elementinden direkt veri oku
       // Önce offer element'inin text content'ini al (tüm bilgiler burada)
@@ -3042,8 +3043,10 @@ class PlaywrightService {
         expressDeliveryDate: cleanExpressDeliveryDate || null, // Express/Fast delivery date
         expressDeliveryDateText: cleanExpressDeliveryDate || null, // Express delivery date text (modal'da gösterilecek)
         // KRİTİK: Gönderim fiyatları - Ayrı field'lar olarak
-        shippingPrice: shippingPrice, // Standard shipping price (geriye dönük uyumluluk)
-        standardShippingPrice: shippingPrice, // Standard shipping price
+        // Import charge dahil toplam shipping fiyatı: Eğer sidebar'dan shipping çekilemediyse buybox'ın shipping'ini kullan
+        // Buybox'taki shipping fiyatı import charge dahil toplam fiyattır
+        shippingPrice: shippingPrice ?? buyboxShippingPrice, // Standard shipping price (geriye dönük uyumluluk)
+        standardShippingPrice: shippingPrice ?? buyboxShippingPrice, // Standard shipping price (import charge dahil)
         expressShippingPrice: null, // Express shipping price (henüz çekilmiyor, ileride eklenebilir)
         // KRİTİK: Seçili ülkeye gönderilmiyor (navbarda seçili ülkeye gönderim yok)
         cannotShipToSelectedCountry: !!cannotShipToSelectedCountry,
@@ -3726,15 +3729,23 @@ class PlaywrightService {
       // Tüm seller offer'larını çek - KRİTİK: Sidebar'dan tüm bilgileri çek (ilk 2 değil, hedef sayısına kadar)
       const sellers = [];
       let uniqueSellers = [];
+      // KRİTİK: Buybox (pinned offer) shipping price - import charge dahil toplam fiyat
+      // Bu değer diğer satıcılar için fallback olarak kullanılacak
+      let buyboxShippingPrice = null;
       try {
         // Önce pinned offer'ı çek (eğer varsa) - Sidebar'dan
         try {
           const pinnedOffer = await page.$('#aod-pinned-offer').catch(() => null);
           if (pinnedOffer) {
             console.log(`🔍 [Playwright] Pinned offer bulundu, sidebar'dan bilgiler çekiliyor...`);
-            const pinnedSellerData = await this.extractSellerDataFromOffer(page, pinnedOffer, 0, true);
+            const pinnedSellerData = await this.extractSellerDataFromOffer(page, pinnedOffer, 0, true, null);
             if (pinnedSellerData) {
               sellers.push(pinnedSellerData);
+              // KRİTİK: Buybox shipping price'ı kaydet - import charge dahil toplam fiyat
+              buyboxShippingPrice = pinnedSellerData.standardShippingPrice || pinnedSellerData.shippingPrice || null;
+              if (buyboxShippingPrice) {
+                console.log(`✅ [Playwright] Buybox shipping price (import charge dahil): $${buyboxShippingPrice}`);
+              }
               console.log(`✅ [Playwright] Pinned offer sidebar'dan çekildi: ${pinnedSellerData.sellerName || pinnedSellerData.soldBy || 'N/A'}`);
             }
           }
@@ -3812,7 +3823,8 @@ class PlaywrightService {
             const offer = toProcess[j];
             try {
               // KRİTİK: Satır içinden veri oku (tıklamaya gerek yok — #aod-price-{i+1}, ships from/sold by/delivery satırda)
-              const sellerData = await this.extractSellerDataFromOffer(page, offer, i + 1, false);
+              // buyboxShippingPrice: Eğer satıcının kendi shipping'i yoksa buybox'ınkini kullan (import charge dahil)
+              const sellerData = await this.extractSellerDataFromOffer(page, offer, i + 1, false, buyboxShippingPrice);
               if (sellerData) {
                 sellers.push(sellerData);
                 console.log(`✅ [Playwright] Seller ${i + 2} satırdan çekildi: ${sellerData.sellerName || sellerData.soldBy || 'N/A'}`);
