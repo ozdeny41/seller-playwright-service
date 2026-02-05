@@ -4011,6 +4011,35 @@ class PlaywrightService {
       if (!finalTotalSellers || finalTotalSellers < finalSellers.length) {
         finalTotalSellers = finalSellers.length;
       }
+
+      // KRİTİK: Eğer liste hala 1 satıcı ise, AOD DOM'dan fallback ile tüm satıcıları çek
+      if (finalSellers.length <= 1) {
+        try {
+          const fallbackOthers = await this.extractOtherSellersFromAOD(page);
+          if (Array.isArray(fallbackOthers) && fallbackOthers.length > 0) {
+            const buyboxSeller = buyboxData || finalSellers.find(s => s.isBuybox) || null;
+            const merged = [];
+            if (buyboxSeller) {
+              merged.push({ ...buyboxSeller, isBuybox: true });
+            }
+            // Buybox ile aynı satıcıyı tekrar ekleme
+            const norm = (n) => (n || '').toLowerCase().trim().replace(/\s+/g, ' ');
+            const buyboxKey = buyboxSeller ? (norm(buyboxSeller.sellerName) || norm(buyboxSeller.soldBy)) : '';
+            for (const s of fallbackOthers) {
+              const k = norm(s.sellerName) || norm(s.soldBy);
+              if (buyboxKey && k && k === buyboxKey) continue;
+              merged.push(s);
+            }
+            if (merged.length > finalSellers.length) {
+              finalSellers = merged;
+              finalTotalSellers = finalSellers.length;
+              console.log(`✅ [Playwright] Fallback AOD DOM ile ${finalSellers.length} satıcı elde edildi`);
+            }
+          }
+        } catch (e) {
+          console.warn(`⚠️ [Playwright] Fallback AOD DOM hatası: ${e.message}`);
+        }
+      }
       
       // KRİTİK: Import charge hesaplama - buyboxShippingWithImport parametresi varsa
       // Bu değer ana sayfadaki buybox'tan çekilen shipping+import toplam fiyatı
