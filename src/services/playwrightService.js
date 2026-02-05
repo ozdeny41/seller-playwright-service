@@ -4253,6 +4253,10 @@ class PlaywrightService {
       const cleanBuyboxDeliveryDate = this.cleanAmazonHtml(buyboxData.standardDeliveryDate || '');
       const cleanBuyboxExpressDeliveryDate = this.cleanAmazonHtml(buyboxData.expressDeliveryDate || '');
       
+      // Diğer satıcıları da çıkar (AOD offer list)
+      const otherSellers = await this.extractOtherSellersFromAOD(page);
+      console.log(`📊 [Seller Playwright] AOD'dan çıkarılan toplam satıcı sayısı: ${1 + otherSellers.length} (${1} buybox + ${otherSellers.length} diğer)`);
+
       const sellersData = {
         sellers: [{
           index: 0,
@@ -4275,7 +4279,7 @@ class PlaywrightService {
           shippingPrice: buyboxData.standardShippingPrice || buyboxData.shippingPrice,
           standardShippingPrice: buyboxData.standardShippingPrice || buyboxData.shippingPrice,
           expressShippingPrice: buyboxData.expressShippingPrice
-        }],
+        }, ...otherSellers],
         marketplace: sourceMarketplace,
         updatedAt: new Date().toISOString()
       };
@@ -4283,6 +4287,91 @@ class PlaywrightService {
     } catch (error) {
       console.error(`❌ [Seller Playwright] getSellerInfoFromPage hatası:`, error.message);
       return { success: false, shippingData: null, sellersData: null, error: error.message };
+    }
+  }
+
+  /**
+   * AOD sayfasından diğer satıcıları çıkar
+   */
+  async extractOtherSellersFromAOD(page) {
+    try {
+      const otherSellers = [];
+
+      // AOD offer list'ini bekle
+      await page.waitForSelector('#aod-offer-list, #aod-container #aod-offer, .aod-offer', { timeout: 10000 }).catch(() => {
+        console.log('⚠️ [Seller Playwright] AOD offer list bulunamadı, sadece buybox satıcısı var');
+        return otherSellers;
+      });
+
+      // Diğer satıcıları çıkar
+      const offers = await page.$$eval('#aod-offer-list .aod-offer, #aod-container .aod-offer, .aod-offer', (elements) => {
+        return elements.slice(0, 10).map((el, index) => { // İlk 10 satıcıyı al
+          try {
+            // Fiyat
+            const priceEl = el.querySelector('.a-price .a-offscreen') || el.querySelector('.a-color-price');
+            const priceText = priceEl?.textContent?.trim() || '';
+            const price = priceText ? parseFloat(priceText.replace(/[^0-9.]/g, '')) : null;
+
+            // Satıcı adı
+            const sellerEl = el.querySelector('.a-size-small.a-link-normal, [data-cy="seller-name"]') ||
+                           el.querySelector('.a-link-normal[aria-label*="sold by"]') ||
+                           el.querySelector('.a-link-normal');
+            const sellerName = sellerEl?.textContent?.trim() || '';
+            const soldBy = sellerName;
+
+            // Koşul
+            const conditionEl = el.querySelector('.a-size-small.a-color-secondary') ||
+                              el.querySelector('.a-text-bold + .a-size-small');
+            const condition = conditionEl?.textContent?.trim() || 'New';
+
+            // Gönderim
+            const shippingEl = el.querySelector('.a-size-small.a-color-secondary:not(.a-text-bold)') ||
+                             el.querySelector('.a-row .a-size-small:not(.a-link-normal)');
+            const shippingText = shippingEl?.textContent?.trim() || '';
+
+            // FBA/FBM kontrolü
+            const isFBA = el.textContent?.includes('FREE Shipping') ||
+                         el.textContent?.includes('Fulfilled by Amazon') ||
+                         el.querySelector('[aria-label*="FREE Shipping"]') !== null;
+            const isSBA = el.textContent?.includes('Ships from') ||
+                         el.textContent?.includes('Sold by') ||
+                         !isFBA;
+
+            return {
+              index: index + 1, // Buybox 0, diğerleri 1'den başlar
+              isBuybox: false,
+              condition: condition,
+              isNew: condition.toLowerCase().includes('new'),
+              isUsed: condition.toLowerCase().includes('used'),
+              price: price,
+              priceText: priceText,
+              shipsFrom: '',
+              soldBy: soldBy,
+              sellerName: sellerName,
+              fulfillmentType: isFBA ? 'FBA' : 'FBM',
+              isFBA: isFBA,
+              isFBM: !isFBA,
+              isSBA: isSBA,
+              deliveryDate: shippingText,
+              standardDeliveryDate: shippingText,
+              expressDeliveryDate: '',
+              shippingPrice: null,
+              standardShippingPrice: null,
+              expressShippingPrice: null
+            };
+          } catch (e) {
+            return null;
+          }
+        }).filter(Boolean);
+      });
+
+      otherSellers.push(...offers);
+      console.log(`📦 [Seller Playwright] AOD'dan ${otherSellers.length} diğer satıcı çıkarıldı`);
+
+      return otherSellers;
+    } catch (error) {
+      console.warn(`⚠️ [Seller Playwright] Diğer satıcılar çıkarılamadı:`, error.message);
+      return [];
     }
   }
 
