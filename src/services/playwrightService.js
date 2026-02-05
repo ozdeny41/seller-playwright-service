@@ -4299,22 +4299,23 @@ class PlaywrightService {
    * AOD sayfasından diğer satıcıları çıkar
    */
   async extractOtherSellersFromAOD(page) {
-    console.log('🔍 [Seller Playwright] extractOtherSellersFromAOD başladı');
+    console.log('🔍 [Seller Playwright] extractOtherSellersFromAOD başladı - ULTRA FAST MODE');
     try {
       const otherSellers = [];
 
-      // AOD offer list'ini bekle - ultra kısa timeout
-      console.log('⏳ [Seller Playwright] AOD offer list bekleniyor...');
-      await page.waitForSelector('#aod-offer-list .aod-offer, .aod-offer', { timeout: 1000 }).catch(() => {
+      // AOD offer list'ini bekle - hiç bekleme, hemen dön
+      console.log('⚡ [Seller Playwright] AOD offer list kontrol ediliyor...');
+      const selectorExists = await page.locator('#aod-offer-list .aod-offer, .aod-offer').count().then(count => count > 0);
+      if (!selectorExists) {
         console.log('⚠️ [Seller Playwright] AOD offer list bulunamadı, sadece buybox satıcısı var');
         return otherSellers;
-      });
+      }
       console.log('✅ [Seller Playwright] AOD offer list bulundu');
 
       // Diğer satıcıları çıkar - sadece 1 satıcı çıkar (ultra hızlı olsun)
       const offers = await page.$$eval('#aod-offer-list .aod-offer, #aod-container .aod-offer, .aod-offer', (elements) => {
         console.log(`Found ${elements.length} seller elements on AOD page`);
-        return elements.slice(0, 1).map((el, index) => { // Sadece ilk 1 satıcıyı al (ultra hızlı)
+        return elements.slice(0, 3).map((el, index) => { // İlk 3 satıcıyı al (hızlı ama yeterli)
           try {
             // Fiyat
             const priceEl = el.querySelector('.a-price .a-offscreen') || el.querySelector('.a-color-price');
