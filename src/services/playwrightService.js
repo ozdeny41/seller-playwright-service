@@ -4254,8 +4254,13 @@ class PlaywrightService {
       const cleanBuyboxExpressDeliveryDate = this.cleanAmazonHtml(buyboxData.expressDeliveryDate || '');
       
       // Diğer satıcıları da çıkar (AOD offer list)
-      const otherSellers = await this.extractOtherSellersFromAOD(page);
-      console.log(`📊 [Seller Playwright] AOD'dan çıkarılan toplam satıcı sayısı: ${1 + otherSellers.length} (${1} buybox + ${otherSellers.length} diğer)`);
+      let otherSellers = [];
+      try {
+        otherSellers = await this.extractOtherSellersFromAOD(page);
+        console.log(`📊 [Seller Playwright] AOD'dan çıkarılan toplam satıcı sayısı: ${1 + otherSellers.length} (${1} buybox + ${otherSellers.length} diğer)`);
+      } catch (error) {
+        console.warn(`⚠️ [Seller Playwright] Diğer satıcılar çıkarılamadı:`, error.message);
+      }
 
       const sellersData = {
         sellers: [{
@@ -4294,14 +4299,17 @@ class PlaywrightService {
    * AOD sayfasından diğer satıcıları çıkar
    */
   async extractOtherSellersFromAOD(page) {
+    console.log('🔍 [Seller Playwright] extractOtherSellersFromAOD başladı');
     try {
       const otherSellers = [];
 
       // AOD offer list'ini bekle - daha kısa timeout
+      console.log('⏳ [Seller Playwright] AOD offer list bekleniyor...');
       await page.waitForSelector('#aod-offer-list .aod-offer, .aod-offer', { timeout: 5000 }).catch(() => {
         console.log('⚠️ [Seller Playwright] AOD offer list bulunamadı, sadece buybox satıcısı var');
         return otherSellers;
       });
+      console.log('✅ [Seller Playwright] AOD offer list bulundu');
 
       // Diğer satıcıları çıkar - sadece ilk 3 satıcıyı hızlı çıkar
       const offers = await page.$$eval('#aod-offer-list .aod-offer, #aod-container .aod-offer, .aod-offer', (elements) => {
