@@ -2401,7 +2401,8 @@ class PlaywrightService {
               
               if (priceText) {
                 // Fiyatı parse et - "$134.99" -> 134.99
-                const priceMatch = priceText.match(/[\$£€]?\s*([\d,]+\.?\d*)/);
+                // KRİTİK: Para birimi şartı (Save 5% gibi metinleri fiyat sanma)
+                const priceMatch = priceText.match(/[\$£€]\s*([\d,]+\.?\d*)/);
                 if (priceMatch) {
                   price = parseFloat(priceMatch[1].replace(/,/g, ''));
                 }
@@ -2415,7 +2416,8 @@ class PlaywrightService {
           // Eğer hala bulunamadıysa, tüm text'ten çıkar
           if (!price && !priceText) {
             const allText = await offerElement.textContent();
-            const priceMatch = allText.match(/[\$£€]?\s*([\d,]+\.?\d*)/);
+            // KRİTİK: Para birimi şartı (Save 5% gibi metinleri fiyat sanma)
+            const priceMatch = allText.match(/[\$£€]\s*([\d,]+\.?\d*)/);
             if (priceMatch) {
               price = parseFloat(priceMatch[1].replace(/,/g, ''));
               priceText = priceMatch[0];
@@ -2701,31 +2703,8 @@ class PlaywrightService {
             }
           }
           
-          // Pinned değilse: tıklanan offer için sidebar #aod-offer-soldBy (getSellerInfo'da tıklama yapıldı)
-          if (!soldBy && !isPinnedOffer) {
-            const globalSoldBy = await page.$('#aod-offer-soldBy').catch(() => null);
-            if (globalSoldBy) {
-              const t = await globalSoldBy.textContent().then(x => x && x.trim()).catch(() => null);
-              if (t) {
-                const m = t.match(/Sold by\s+([^\n\r]+?)(?:\s+Seller rating|$)/i);
-                if (m) { soldBy = m[1].trim(); sellerName = soldBy; }
-                if (!sellerRating) {
-                  const ratingMatch = t.match(/(\d+(?:\.\d+)?)\s+out of\s+5\s+stars/i);
-                  if (ratingMatch) sellerRating = parseFloat(ratingMatch[1]);
-                }
-                // KRİTİK: Seller rating count
-                if (!sellerRatingCount) {
-                  const ratingCountMatch = t.match(/\((\d{1,3}(?:,\d{3})*|\d+)\s*(?:ratings?|değerlendirme)\)/i);
-                  if (ratingCountMatch) sellerRatingCount = ratingCountMatch[1].replace(/,/g, '');
-                }
-                // KRİTİK: Positive percentage
-                if (!positivePercentage) {
-                  const positiveMatch = t.match(/(\d+(?:\.\d+)?)\s*%\s*positive/i);
-                  if (positiveMatch) positivePercentage = parseFloat(positiveMatch[1]);
-                }
-              }
-            }
-          }
+          // NOTE: Non-pinned offer'larda global #aod-offer-soldBy kullanma.
+          // Bu selector tıklanan tek offer'a ait olduğundan diğer offer'lara yanlış seller atıyordu.
           
           // KRİTİK: Satıcı değerlendirmelerini #aod-offer-seller-rating elementinden çek
           // Pinned offer için: #aod-offer-seller-rating (global)
@@ -3720,9 +3699,9 @@ class PlaywrightService {
       }
 
       // OPTİMİZE: Daha hızlı ve akıllı scroll - 25+20+12=57 adım yerine 8-12 adım kullan
-      // Hedef: totalSellers kadar satıcı yükle, max 30 saniye bekleme
-      const targetOther = totalSellers > 0 ? Math.max(totalSellers - 1, 1) : 25;
-      const maxTarget = Math.min(targetOther, 50); // Max 50 satıcı sınırla
+      // Hedef: totalSellers yanlış/eksik okunabilir; en az 25 satır yüklemeye çalış.
+      const targetOther = totalSellers > 0 ? Math.max(totalSellers - 1, 25) : 25;
+      const maxTarget = Math.min(Math.max(targetOther, 25), 50); // 25-50 arası sınırla
 
       const getOfferCount = async () => {
         const bySection = await page.$$('#aod-offer-list > div.a-section').then(els => els.length).catch(() => 0);
@@ -3827,9 +3806,8 @@ class PlaywrightService {
           }
           if (offerElements.length === 0) offerElements = await page.$$('#aod-offer-list > *').catch(() => []);
         }
-        // KRİTİK: Tüm bulunan liste satırlarını işle (totalSellers kadar çek - eğer totalSellers 8 ise 8 satıcı çekilmeli)
-        // Eğer totalSellers bilinmiyorsa veya 0 ise, DOM'da görünen tüm satırları çek (max 50)
-        const maxOther = totalSellers > 0 ? totalSellers : 50;
+        // KRİTİK: totalSellers düşük/yanlış olabilir; DOM'daki sayıyı ve minimum 25'i baz al
+        const maxOther = Math.min(Math.max(totalSellers || 0, offerElements.length, 25), 50);
         console.log(`📊 [Playwright] ASIN ${asin} liste satır sayısı (DOM): ${offerElements.length}, totalSellers (okunan): ${totalSellers}, işlenecek max: ${maxOther}`);
         let processedCount = 0;
         let offerIndex = 0;
