@@ -3982,29 +3982,8 @@ class PlaywrightService {
       // KRİTİK: uniqueSellers KULLANMA - aynı satıcı adına sahip tüm offer'ları tek satıcıda birleştiriyor
       // Örn: 9 offer (New, Used - Very Good, vb.) hepsi "Amazon" -> uniqueSellers sadece 1 satıcı döndürüyor
       // Tüm offer'ları göster (sellersWithoutDuplicateBuybox), sadece tam duplicate'leri filtrele
+      // KRİTİK: Tüm teklifleri göster - duplicate filtreleme YAPMA
       let finalSellers = sellersWithoutDuplicateBuybox;
-      const seenOfferKey = new Set();
-      const nameKeyFor = (s, fallback) => {
-        // Normalize et ama canonicalSellerName kullanma - sadece lowercase ve trim yap
-        const a = (s.sellerName || '').toLowerCase().trim().replace(/\s+/g, ' ');
-        const b = (s.soldBy || '').toLowerCase().trim().replace(/\s+/g, ' ');
-        const nameNorm = a || b || '';
-        return nameNorm && nameNorm.length >= 2 ? nameNorm : (fallback != null ? fallback : `idx-${s.index ?? seenOfferKey.size}`);
-      };
-      finalSellers = finalSellers.filter((s, idx) => {
-        const nameKey = nameKeyFor(s, null);
-        const priceVal = priceValFor(s);
-        const conditionVal = (s.condition || '').trim().toLowerCase();
-        // KRİTİK: Condition'ı da dahil et - aynı satıcı + aynı fiyat + aynı condition = duplicate
-        // Farklı condition'lardaki offer'ları göster (New vs Used - Very Good farklı satırlar)
-        const key = `${nameKey}|${priceVal}|${conditionVal}`;
-        if (seenOfferKey.has(key)) {
-          console.log(`🔍 [Playwright] Çift teklif atlandı (aynı satıcı + aynı fiyat + aynı condition): ${s.sellerName || s.soldBy} @ ${priceVal} (${conditionVal})`);
-          return false;
-        }
-        seenOfferKey.add(key);
-        return true;
-      });
       // KRİTİK: "Fiyatsız kopya atlandı" kaldırıldı — sayfada 4 teklif varsa 4 satır döndür (fiyat okunamasa bile modalda hepsi görünsün)
       let finalTotalSellers = finalSellers.length;
       
@@ -4396,17 +4375,31 @@ class PlaywrightService {
         console.log(`Found ${elements.length} seller elements on AOD page`);
         return elements.map((el, index) => {
           try {
+            const fullText = (el.textContent || '').replace(/\s+/g, ' ').trim();
+
             // Fiyat
             const priceEl = el.querySelector('.a-price .a-offscreen') || el.querySelector('.a-color-price');
             const priceText = priceEl?.textContent?.trim() || '';
             const price = priceText ? parseFloat(priceText.replace(/[^0-9.]/g, '')) : null;
 
-            // Satıcı adı
-            const sellerEl = el.querySelector('.a-size-small.a-link-normal, [data-cy="seller-name"]') ||
-                           el.querySelector('.a-link-normal[aria-label*="sold by"]') ||
-                           el.querySelector('.a-link-normal');
-            const sellerName = sellerEl?.textContent?.trim() || '';
-            const soldBy = sellerName;
+            // Sold by / Seller name
+            let soldBy = '';
+            let sellerName = '';
+            const soldByMatch = fullText.match(/Sold by\s+(.+?)(?:Seller rating|Ships from|$)/i);
+            if (soldByMatch) {
+              soldBy = soldByMatch[1].trim();
+              sellerName = soldBy;
+            }
+            if (!soldBy) {
+              const sellerEl = el.querySelector('.a-size-small.a-link-normal, [data-cy="seller-name"]') ||
+                             el.querySelector('.a-link-normal[aria-label*="sold by"]') ||
+                             el.querySelector('.a-link-normal');
+              const t = sellerEl?.textContent?.trim() || '';
+              if (t) {
+                sellerName = t;
+                soldBy = t;
+              }
+            }
 
             // Koşul
             const conditionEl = el.querySelector('.a-size-small.a-color-secondary') ||
@@ -4417,6 +4410,13 @@ class PlaywrightService {
             const shippingEl = el.querySelector('.a-size-small.a-color-secondary:not(.a-text-bold)') ||
                              el.querySelector('.a-row .a-size-small:not(.a-link-normal)');
             const shippingText = shippingEl?.textContent?.trim() || '';
+
+            // Ships from
+            let shipsFrom = '';
+            const shipsFromMatch = fullText.match(/Ships from\s+(.+?)(?:Sold by|$)/i);
+            if (shipsFromMatch) {
+              shipsFrom = shipsFromMatch[1].trim();
+            }
 
             // FBA/FBM kontrolü
             const isFBA = el.textContent?.includes('FREE Shipping') ||
@@ -4434,7 +4434,7 @@ class PlaywrightService {
               isUsed: condition.toLowerCase().includes('used'),
               price: price,
               priceText: priceText,
-              shipsFrom: '',
+              shipsFrom: shipsFrom,
               soldBy: soldBy,
               sellerName: sellerName,
               fulfillmentType: isFBA ? 'FBA' : 'FBM',
