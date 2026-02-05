@@ -3093,7 +3093,8 @@ class PlaywrightService {
       
       // KRİTİK: Ülke/para seçimi sonrası doğrudan AOD URL (olp-opf-redir) — scroll yok, sadece #aod-filter-offer-count-string kadar
       const productUrl = `${baseUrl}/dp/${asin}`;
-      const directAodUrl = `${baseUrl}/dp/${asin}/ref=olp-opf-redir?aod=1&ie=UTF8&condition=NEW&th=1`;
+      // KRİTİK: Tüm condition'lar (New + Used) için ALL kullan
+      const directAodUrl = `${baseUrl}/dp/${asin}/ref=olp-opf-redir?aod=1&ie=UTF8&condition=ALL&th=1`;
       
       // İlk navigasyon: ülke seçimi gerekiyorsa baseUrl, değilse direkt AOD
       if (targetCountry && !usePool && !opts.sharedPage) {
@@ -3192,7 +3193,7 @@ class PlaywrightService {
             if (href) {
               if (!href.startsWith('http')) href = `${baseUrl}${href.startsWith('/') ? href : '/' + href}`;
               if (href.includes('#') && !href.includes('/gp/offer-listing/')) {
-                const aodUrl = `${baseUrl}/gp/offer-listing/${asin}?condition=NEW&ie=UTF8`;
+                const aodUrl = `${baseUrl}/gp/offer-listing/${asin}?condition=ALL&ie=UTF8`;
                 console.log(`🔗 [Playwright] Hash link tespit edildi, offer-listing URL'ye gidiliyor: ${aodUrl}`);
                 await page.goto(aodUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }); // 35s -> 60s (504 önleme)
               } else {
@@ -3205,7 +3206,7 @@ class PlaywrightService {
               await this.safeWait(page, 3000);
             }
           } else {
-            const aodUrl = `${baseUrl}/gp/offer-listing/${asin}?condition=NEW&ie=UTF8`;
+            const aodUrl = `${baseUrl}/gp/offer-listing/${asin}?condition=ALL&ie=UTF8`;
             console.log(`🔗 [Playwright] New & Used link bulunamadı, klasik offer-listing URL deneniyor: ${aodUrl}`);
             await page.goto(aodUrl, { waitUntil: 'domcontentloaded', timeout: 18000 });
             await this.safeWait(page, 3000);
@@ -3514,7 +3515,7 @@ class PlaywrightService {
               const urlObj = new URL(currentUrl);
               const domain = `${urlObj.protocol}//${urlObj.host}`;
               // ASIN'den AOD URL'yi oluştur (domain + /gp/offer-listing/...)
-              const aodUrl = `${domain}/gp/offer-listing/${asin}/ref=dp_olp_NEW_mbc?ie=UTF8&condition=NEW`;
+              const aodUrl = `${domain}/gp/offer-listing/${asin}/ref=dp_olp_ALL_mbc?ie=UTF8&condition=ALL`;
               console.log(`🔗 [Playwright] AOD URL oluşturuldu: ${aodUrl}`);
               await page.goto(aodUrl, { waitUntil: 'domcontentloaded', timeout: 18000 });
               console.log(`✅ [Playwright] AOD sayfasına gidildi (hash URL fallback)`);
