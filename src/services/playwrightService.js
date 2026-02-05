@@ -206,7 +206,7 @@ class PlaywrightService {
           const setupPage = await context.newPage();
           console.log(`🌐 [Seller Playwright] Setup sayfası açılıyor: ${baseUrl}`);
           try {
-            await setupPage.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 25000 });
+            await setupPage.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
             console.log(`✅ [Seller Playwright] Setup sayfası yüklendi`);
           } catch (gotoErr) {
             console.error(`❌ [Seller Playwright] Setup sayfası yükleme hatası: ${gotoErr.message}`);
@@ -1118,7 +1118,7 @@ class PlaywrightService {
       // KRİTİK: Sayfa yeniden yüklenecek, bunu bekle - timeout kısaltıldı
       console.log(`⏳ [Playwright] Sayfa yeniden yüklenmesi bekleniyor (Done butonuna tıklandıktan sonra)...`);
       try {
-        await page.waitForLoadState('networkidle', { timeout: 25000 }).catch(() => { // 10s -> 25s (504 önleme)
+        await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => { // 10s -> 30s
           console.warn(`⚠️ [Playwright] Network idle bekleme timeout, devam ediliyor...`);
         });
         await this.safeWait(page, 1000); // 2s -> 1s
@@ -1337,7 +1337,7 @@ class PlaywrightService {
         // Buybox container'ının yüklenmesini bekle
         try {
           await page.waitForSelector('#desktop_buybox, #buybox, #qualifiedBuybox, #apex_offerDisplay_single_desktop, #apex_offerDisplay_desktop', { 
-            timeout: 25000, // 20s -> 25s (Railway proxy 504 önleme) 
+            timeout: 30000, // 20s -> 30s 
             state: 'attached' 
           });
           console.log(`✅ [Playwright] Buybox container yüklendi`);
@@ -3194,7 +3194,7 @@ class PlaywrightService {
               if (href.includes('#') && !href.includes('/gp/offer-listing/')) {
                 const aodUrl = `${baseUrl}/gp/offer-listing/${asin}?condition=NEW&ie=UTF8`;
                 console.log(`🔗 [Playwright] Hash link tespit edildi, offer-listing URL'ye gidiliyor: ${aodUrl}`);
-                await page.goto(aodUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }); // 35s -> 30s (Railway proxy 504 önleme)
+                await page.goto(aodUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }); // 35s -> 60s (504 önleme)
               } else {
                 console.log(`🔗 [Playwright] New & Used href ile gidiliyor: ${href.substring(0, 80)}...`);
                 await page.goto(href, { waitUntil: 'domcontentloaded', timeout: 18000 });
@@ -3588,7 +3588,7 @@ class PlaywrightService {
       // AOD (All Offers Display) container'ını bekle - KRİTİK: Sidebar açılması için bekle
       console.log(`🛒 [Playwright] Seller listesi container'ı bekleniyor (sidebar açılması için)...`);
       try {
-        // Önce sidebar container'ını bekle (timeout 25s — Railway proxy 504 önleme)
+        // Önce sidebar container'ını bekle (timeout 10s — Railway proxy 504 önleme)
         await page.waitForSelector('#all-offers-display, #aod-container, #aod-offer-list, #aod-offer, #aod-pinned-offer', { timeout: 10000, state: 'visible' });
         console.log(`✅ [Playwright] Seller listesi container bulundu`);
         
