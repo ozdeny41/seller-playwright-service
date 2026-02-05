@@ -455,7 +455,7 @@ class PlaywrightService {
               console.log(`✅ [Playwright] "Continue shopping" butonuna tıklandı, sayfa yüklenmesi bekleniyor...`);
               
               // Sayfa yüklenmesini bekle - timeout kısaltıldı
-              await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => { // 30s -> 10s
+              await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => { // 10s -> 30s (504 önleme)
                 console.warn(`⚠️ [Playwright] Network idle bekleme timeout, devam ediliyor...`);
               });
               await this.safeWait(page, 2000); // 5s -> 2s
@@ -539,7 +539,7 @@ class PlaywrightService {
       
       // Network idle olmasını bekle (sayfa tam yüklensin) - timeout'u kısalt
       try {
-        await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => { // 10s -> 5s
+        await page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => { // 5s -> 20s (504 önleme)
           console.warn(`⚠️ [Playwright] Network idle bekleme timeout, devam ediliyor...`);
         });
       } catch (e) {
@@ -844,7 +844,7 @@ class PlaywrightService {
       console.log(`🎭 [Playwright] Popover açılması bekleniyor...`);
       // KRİTİK: Popover açılmasını bekle (#a-popover-3 veya #a-popover-4) - timeout kısaltıldı
       try {
-        await page.waitForSelector('#a-popover-3, #a-popover-4, .a-popover-wrapper, #GLUX_Popover', { timeout: 5000, state: 'visible' }); // 15s -> 5s
+        await page.waitForSelector('#a-popover-3, #a-popover-4, .a-popover-wrapper, #GLUX_Popover', { timeout: 15000, state: 'visible' }); // 5s -> 15s (504 önleme)
         console.log(`✅ [Playwright] Popover açıldı`);
       } catch (popoverError) {
         console.warn(`⚠️ [Playwright] Popover selector bulunamadı, devam ediliyor...`);
@@ -863,7 +863,7 @@ class PlaywrightService {
       let countryDropdown = null;
       for (const selector of dropdownSelectors) {
         try {
-          countryDropdown = await page.waitForSelector(selector, { timeout: 5000, state: 'visible' }); // 15s -> 5s
+          countryDropdown = await page.waitForSelector(selector, { timeout: 15000, state: 'visible' }); // 5s -> 15s (504 önleme)
           if (countryDropdown) {
             console.log(`✅ [Playwright] Ülke dropdown bulundu: ${selector}`);
             break;
@@ -911,7 +911,7 @@ class PlaywrightService {
       if (firstLetter) {
         try {
           // KRİTİK: Popover içindeki liste görünür olana kadar bekle - timeout kısaltıldı
-          await page.waitForSelector('#a-popover-4 ul.a-list-item, ul.a-list-item', { timeout: 3000, state: 'visible' }).catch(() => { // 5s -> 3s
+          await page.waitForSelector('#a-popover-4 ul.a-list-item, ul.a-list-item', { timeout: 10000, state: 'visible' }).catch(() => { // 3s -> 10s (504 önleme)
             console.warn(`⚠️ [Playwright] Liste hemen görünür olmadı, devam ediliyor...`);
           });
           await this.safeWait(page, 300); // 500ms -> 300ms
@@ -1118,7 +1118,7 @@ class PlaywrightService {
       // KRİTİK: Sayfa yeniden yüklenecek, bunu bekle - timeout kısaltıldı
       console.log(`⏳ [Playwright] Sayfa yeniden yüklenmesi bekleniyor (Done butonuna tıklandıktan sonra)...`);
       try {
-        await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => { // 30s -> 10s
+        await page.waitForLoadState('networkidle', { timeout: 25000 }).catch(() => { // 10s -> 25s (504 önleme)
           console.warn(`⚠️ [Playwright] Network idle bekleme timeout, devam ediliyor...`);
         });
         await this.safeWait(page, 1000); // 2s -> 1s
@@ -1337,7 +1337,7 @@ class PlaywrightService {
         // Buybox container'ının yüklenmesini bekle
         try {
           await page.waitForSelector('#desktop_buybox, #buybox, #qualifiedBuybox, #apex_offerDisplay_single_desktop, #apex_offerDisplay_desktop', { 
-            timeout: 20000, 
+            timeout: 35000, // 20s -> 35s (504 önleme) 
             state: 'attached' 
           });
           console.log(`✅ [Playwright] Buybox container yüklendi`);
@@ -3098,7 +3098,7 @@ class PlaywrightService {
       // İlk navigasyon: ülke seçimi gerekiyorsa baseUrl, değilse direkt AOD
       if (targetCountry && !usePool && !opts.sharedPage) {
         console.log(`🌐 [Playwright] Amazon ana sayfa açılıyor (ülke seçimi için): ${baseUrl}`);
-        await page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+        await page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 60000 }); // 30s -> 60s (504 önleme)
         await this.safeWait(page, 1500);
         console.log(`🌍 [Playwright] Ülke ve para birimi seçimi yapılıyor: ${targetCountry}`);
         const countrySelectionResult = await this.selectCountryAndCurrency(page, targetCountry, sourceMarketplace, productUrl);
@@ -3115,7 +3115,7 @@ class PlaywrightService {
       let gotoOk = false;
       for (let attempt = 1; attempt <= 2 && !gotoOk; attempt++) {
         try {
-          await page.goto(directAodUrl, { waitUntil: 'domcontentloaded', timeout: 35000 });
+          await page.goto(directAodUrl, { waitUntil: 'domcontentloaded', timeout: 60000 }); // 35s -> 60s (504 önleme)
           gotoOk = true;
         } catch (gotoErr) {
           if (attempt < 2 && (gotoErr.message?.includes('Timeout') || gotoErr.message?.includes('timeout'))) {
@@ -3170,7 +3170,7 @@ class PlaywrightService {
         const aodContainer = await page.$('#aod-offer-list, #aod-pinned-offer, #aod-container, #all-offers-display').catch(() => null);
         if (!aodContainer) {
           console.warn(`⚠️ [Playwright] AOD container direct URL ile bulunamadı, PDP'den "New & Used" ile açılıyor...`);
-          await page.goto(productUrl, { waitUntil: 'domcontentloaded', timeout: 35000 });
+          await page.goto(productUrl, { waitUntil: 'domcontentloaded', timeout: 60000 }); // 35s -> 60s (504 önleme)
           await this.safeWait(page, 2500);
           let newAndUsedLink = await page.$('a#aod-ingress-link').catch(() => null);
           if (!newAndUsedLink) {
@@ -3194,7 +3194,7 @@ class PlaywrightService {
               if (href.includes('#') && !href.includes('/gp/offer-listing/')) {
                 const aodUrl = `${baseUrl}/gp/offer-listing/${asin}?condition=NEW&ie=UTF8`;
                 console.log(`🔗 [Playwright] Hash link tespit edildi, offer-listing URL'ye gidiliyor: ${aodUrl}`);
-                await page.goto(aodUrl, { waitUntil: 'domcontentloaded', timeout: 35000 });
+                await page.goto(aodUrl, { waitUntil: 'domcontentloaded', timeout: 60000 }); // 35s -> 60s (504 önleme)
               } else {
                 console.log(`🔗 [Playwright] New & Used href ile gidiliyor: ${href.substring(0, 80)}...`);
                 await page.goto(href, { waitUntil: 'domcontentloaded', timeout: 35000 });
@@ -3588,8 +3588,8 @@ class PlaywrightService {
       // AOD (All Offers Display) container'ını bekle - KRİTİK: Sidebar açılması için bekle
       console.log(`🛒 [Playwright] Seller listesi container'ı bekleniyor (sidebar açılması için)...`);
       try {
-        // Önce sidebar container'ını bekle (timeout 15s — yavaş sayfalarda da görünsün)
-        await page.waitForSelector('#all-offers-display, #aod-container, #aod-offer-list, #aod-offer, #aod-pinned-offer', { timeout: 15000, state: 'visible' });
+        // Önce sidebar container'ını bekle (timeout 45s — yavaş sayfalarda da görünsün, 504 önleme)
+        await page.waitForSelector('#all-offers-display, #aod-container, #aod-offer-list, #aod-offer, #aod-pinned-offer', { timeout: 45000, state: 'visible' });
         console.log(`✅ [Playwright] Seller listesi container bulundu`);
         
         // KRİTİK: Sidebar'ın tamamen yüklenmesi için ek bekleme
