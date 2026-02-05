@@ -4311,9 +4311,10 @@ class PlaywrightService {
       });
       console.log('✅ [Seller Playwright] AOD offer list bulundu');
 
-      // Diğer satıcıları çıkar - sadece ilk 3 satıcıyı hızlı çıkar
+      // Diğer satıcıları çıkar - tüm satıcıları çıkar
       const offers = await page.$$eval('#aod-offer-list .aod-offer, #aod-container .aod-offer, .aod-offer', (elements) => {
-        return elements.slice(0, 3).map((el, index) => { // Sadece ilk 3 satıcıyı al (hızlı olsun)
+        console.log(`Found ${elements.length} seller elements on AOD page`);
+        return elements.slice(0, 10).map((el, index) => { // İlk 10 satıcıyı al
           try {
             // Fiyat
             const priceEl = el.querySelector('.a-price .a-offscreen') || el.querySelector('.a-color-price');
@@ -4375,6 +4376,11 @@ class PlaywrightService {
 
       otherSellers.push(...offers);
       console.log(`📦 [Seller Playwright] AOD'dan ${otherSellers.length} diğer satıcı çıkarıldı`);
+      console.log(`📦 [Seller Playwright] İlk satıcı örneği:`, otherSellers[0] ? {
+        sellerName: otherSellers[0].sellerName,
+        price: otherSellers[0].price,
+        condition: otherSellers[0].condition
+      } : 'Hiç satıcı bulunamadı');
 
       return otherSellers;
     } catch (error) {
