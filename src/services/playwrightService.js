@@ -66,7 +66,7 @@ class PlaywrightService {
     cleaned = cleaned.replace(/See less/gi, '').trim();
     cleaned = cleaned.replace(/See more/gi, '').trim();
     // UI/placeholder metinlerini temizle
-    cleaned = cleaned.replace(/\b(View Cart|Added|Updated|Not added|Qty:\s*\d+)\b/gi, '').trim();
+    cleaned = cleaned.replace(/\b(View Cart|Added|Updated|Not added|Qty:\s*\d+|Details)\b/gi, '').trim();
     
     // Fazla boşlukları temizle
     cleaned = cleaned.replace(/\s+/g, ' ').trim();
@@ -75,6 +75,21 @@ class PlaywrightService {
     if (!cleaned || cleaned.length === 0) return '';
     
     return cleaned;
+  }
+
+  isInvalidSellerText(text) {
+    if (!text) return true;
+    const v = String(text).toLowerCase().trim();
+    return (
+      v === 'details' ||
+      v === 'see less' ||
+      v === 'see more' ||
+      v === 'view cart' ||
+      v === 'added' ||
+      v === 'updated' ||
+      v === 'not added' ||
+      v.startsWith('qty:')
+    );
   }
 
   async closeBrowserForRecycle() {
@@ -2187,6 +2202,11 @@ class PlaywrightService {
       // Önce offer element'inin text content'ini al (tüm bilgiler burada)
       const offerText = await offerElement.textContent().catch(() => '');
       console.log(`🔍 [Playwright] Offer ${index} text content (ilk 200 karakter): ${offerText.substring(0, 200)}`);
+
+      const normalizeSellerText = (value) => {
+        const cleaned = this.cleanAmazonHtml(value || '');
+        return this.isInvalidSellerText(cleaned) ? null : cleaned;
+      };
       
       // Condition (New, Used - Like New, Used - Very Good, vb.)
       let condition = null;
@@ -2488,9 +2508,12 @@ class PlaywrightService {
         // "Sold by ..." metninden çıkar
         const soldByMatch = offerText.match(/Sold by\s+([^\n\r]+?)(?:\s+Seller rating|$)/i);
         if (soldByMatch) {
-          soldBy = soldByMatch[1].trim();
-          sellerName = soldBy;
-          console.log(`✅ [Playwright] Offer ${index} soldBy offer element'inden çekildi: ${soldBy} -> sellerName: ${sellerName}`);
+          const normalized = normalizeSellerText(soldByMatch[1].trim());
+          if (normalized) {
+            soldBy = normalized;
+            sellerName = soldBy;
+            console.log(`✅ [Playwright] Offer ${index} soldBy offer element'inden çekildi: ${soldBy} -> sellerName: ${sellerName}`);
+          }
         }
         
         // Seller rating - "Seller rating is 5 out of 5 stars"
@@ -2527,9 +2550,12 @@ class PlaywrightService {
                 if (colRight) {
                   const t = await colRight.textContent().then(x => x && x.trim()).catch(() => null);
                   if (t) {
-                    soldBy = t;
-                    sellerName = soldBy;
-                    console.log(`✅ [Playwright] Offer ${index} soldBy (pinned .a-col-right) çekildi: ${soldBy}`);
+                    const normalized = normalizeSellerText(t);
+                    if (normalized) {
+                      soldBy = normalized;
+                      sellerName = soldBy;
+                      console.log(`✅ [Playwright] Offer ${index} soldBy (pinned .a-col-right) çekildi: ${soldBy}`);
+                    }
                   }
                 }
                 if (!soldBy) {
@@ -2537,8 +2563,11 @@ class PlaywrightService {
                   if (soldByText) {
                     const soldByMatch = soldByText.match(/Sold by\s+([^\n\r]+?)(?:\s+Seller rating|$)/i);
                     if (soldByMatch) {
-                      soldBy = soldByMatch[1].trim();
-                      sellerName = soldBy;
+                      const normalized = normalizeSellerText(soldByMatch[1].trim());
+                      if (normalized) {
+                        soldBy = normalized;
+                        sellerName = soldBy;
+                      }
                     }
                     if (!sellerRating) {
                       const ratingMatch = soldByText.match(/(\d+(?:\.\d+)?)\s+out of\s+5\s+stars/i);
@@ -2609,8 +2638,11 @@ class PlaywrightService {
                 if (colRight) {
                   const t = await colRight.textContent().then(x => x && x.trim()).catch(() => null);
                   if (t) {
-                    soldBy = t;
-                    sellerName = soldBy;
+                    const normalized = normalizeSellerText(t);
+                    if (normalized) {
+                      soldBy = normalized;
+                      sellerName = soldBy;
+                    }
                     console.log(`✅ [Playwright] Offer ${index} soldBy (offer .a-col-right) çekildi: ${soldBy}`);
                   }
                 }
@@ -2619,8 +2651,11 @@ class PlaywrightService {
                   if (soldByText) {
                     const soldByMatch = soldByText.match(/Sold by\s+([^\n\r]+?)(?:\s+Seller rating|$)/i);
                     if (soldByMatch) {
-                      soldBy = soldByMatch[1].trim();
-                      sellerName = soldBy;
+                      const normalized = normalizeSellerText(soldByMatch[1].trim());
+                      if (normalized) {
+                        soldBy = normalized;
+                        sellerName = soldBy;
+                      }
                     }
                     if (!sellerRating) {
                       const ratingMatch = soldByText.match(/(\d+(?:\.\d+)?)\s+out of\s+5\s+stars/i);
@@ -2650,20 +2685,6 @@ class PlaywrightService {
               'a[href*="seller"]',
               '.aod-information-block a[href*="seller"]'
             ];
-            const isInvalidSellerText = (t) => {
-              if (!t) return true;
-              const v = String(t).toLowerCase().trim();
-              return (
-                v === 'details' ||
-                v === 'see less' ||
-                v === 'see more' ||
-                v === 'view cart' ||
-                v === 'added' ||
-                v === 'updated' ||
-                v === 'not added' ||
-                v.startsWith('qty:')
-              );
-            };
             
             for (const selector of sellerLinkSelectors) {
               try {
@@ -2671,15 +2692,18 @@ class PlaywrightService {
                 if (sellerLink) {
                   let t = await sellerLink.textContent().then(x => x && x.trim()).catch(() => null);
                   if (t) {
-                    t = this.cleanAmazonHtml(t);
-                    if (isInvalidSellerText(t)) {
+                    t = normalizeSellerText(t);
+                    if (!t) {
                       continue;
                     }
                     // "Sold by X" formatından sadece X'i çıkar
                     const soldByMatch = t.match(/Sold by\s+(.+?)(?:\s+Seller rating|\s*$)/i);
                     if (soldByMatch) {
-                      soldBy = soldByMatch[1].trim();
-                      sellerName = soldBy;
+                      const normalized = normalizeSellerText(soldByMatch[1].trim());
+                      if (normalized) {
+                        soldBy = normalized;
+                        sellerName = soldBy;
+                      }
                     } else {
                       soldBy = t;
                       sellerName = soldBy;
@@ -2694,7 +2718,7 @@ class PlaywrightService {
                       }
                     }
                     
-                    if (soldBy && !isInvalidSellerText(soldBy)) {
+                    if (soldBy && !this.isInvalidSellerText(soldBy)) {
                       console.log(`✅ [Playwright] Offer ${index} soldBy link'ten çekildi: ${soldBy}`);
                       break;
                     }
@@ -2713,9 +2737,12 @@ class PlaywrightService {
               if (fullText) {
                 const soldByMatch = fullText.match(/Sold by\s+([^\n\r]+?)(?:\s+Ships from|\s+Seller rating|\s*$)/i);
                 if (soldByMatch) {
-                  soldBy = soldByMatch[1].trim();
-                  sellerName = soldBy;
-                  console.log(`✅ [Playwright] Offer ${index} soldBy full text'ten çekildi: ${soldBy}`);
+                  const normalized = normalizeSellerText(soldByMatch[1].trim());
+                  if (normalized) {
+                    soldBy = normalized;
+                    sellerName = soldBy;
+                    console.log(`✅ [Playwright] Offer ${index} soldBy full text'ten çekildi: ${soldBy}`);
+                  }
                 }
               }
             } catch (e) {
@@ -2985,11 +3012,18 @@ class PlaywrightService {
       const cleanDeliveryDate = this.cleanAmazonHtml(deliveryDate || '');
       const cleanExpressDeliveryDate = this.cleanAmazonHtml(expressDeliveryDate || '');
       const cleanDeliveryMessage = this.cleanAmazonHtml(deliveryMessage || '');
+      const finalSellerName = this.isInvalidSellerText(cleanSellerName) ? null : cleanSellerName;
+      const finalSoldBy = this.isInvalidSellerText(cleanSoldBy) ? null : cleanSoldBy;
+
+      if (!finalSellerName && !finalSoldBy) {
+        console.warn(`⚠️ [Playwright] Offer ${index} geçersiz seller (sellerName/soldBy yok), atlandı`);
+        return null;
+      }
       
       // KRİTİK: Amazon'un kendi satıcılarında rating göstermemek için
       // amazon.com, amazon.es, amazon.fr, amazon.co.uk, amazon.co.jp gibi Amazon'un kendi satıcılarında rating yok
-      const sellerNameLower = (cleanSellerName || '').toLowerCase().trim();
-      const soldByLower = (cleanSoldBy || '').toLowerCase().trim();
+      const sellerNameLower = (finalSellerName || '').toLowerCase().trim();
+      const soldByLower = (finalSoldBy || '').toLowerCase().trim();
       const isAmazonOwnSeller = sellerNameLower.includes('amazon') || 
                                 soldByLower.includes('amazon') ||
                                 sellerNameLower === 'amazon.com' ||
@@ -3002,7 +3036,7 @@ class PlaywrightService {
       let finalSellerRatingCount = sellerRatingCount;
       let finalPositivePercentage = positivePercentage;
       if (isAmazonOwnSeller) {
-        console.log(`🔍 [Playwright] Offer ${index} Amazon'un kendi satıcısı tespit edildi, rating bilgileri null yapılıyor: ${cleanSellerName || cleanSoldBy}`);
+        console.log(`🔍 [Playwright] Offer ${index} Amazon'un kendi satıcısı tespit edildi, rating bilgileri null yapılıyor: ${finalSellerName || finalSoldBy}`);
         finalSellerRating = null;
         finalSellerRatingCount = null;
         finalPositivePercentage = null;
@@ -3016,8 +3050,8 @@ class PlaywrightService {
         price: price,
         priceText: cleanPriceText,
         shipsFrom: cleanShipsFrom,
-        soldBy: cleanSoldBy,
-        sellerName: cleanSellerName,
+        soldBy: finalSoldBy,
+        sellerName: finalSellerName,
         // KRİTİK: Fulfillment Type (FBA/FBM/SBA)
         fulfillmentType: fulfillmentType,
         isFBA: isFBA,
