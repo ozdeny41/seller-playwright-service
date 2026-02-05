@@ -3598,6 +3598,8 @@ class PlaywrightService {
       console.log(`⏳ [Playwright] Modal/sayfa açılması bekleniyor (3 saniye)...`);
       await this.safeWait(page, 3000);
       }
+      // if (!isOnAodPage) block end
+      }
       
       // AOD (All Offers Display) container'ını bekle - KRİTİK: Sidebar açılması için bekle
       console.log(`🛒 [Playwright] Seller listesi container'ı bekleniyor (sidebar açılması için)...`);
