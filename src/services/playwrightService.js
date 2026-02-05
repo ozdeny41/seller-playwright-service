@@ -3702,10 +3702,11 @@ class PlaywrightService {
         console.warn(`⚠️ [Playwright] "See more buying choices" butonu kontrol edilemedi: ${e.message}`);
       }
 
-      // KRİTİK: Scroll hedefi — totalSellers kadar liste satırı yükle (eğer totalSellers 8 ise 8 satıcı çekilmeli)
-      // Pinned offer hariç, listedeki diğer satıcılar: totalSellers - 1 (pinned dahil toplam totalSellers)
-      // Eğer totalSellers bilinmiyorsa veya 0 ise, en az 25 satır yükle
+      // OPTİMİZE: Daha hızlı ve akıllı scroll - 25+20+12=57 adım yerine 8-12 adım kullan
+      // Hedef: totalSellers kadar satıcı yükle, max 30 saniye bekleme
       const targetOther = totalSellers > 0 ? Math.max(totalSellers - 1, 1) : 25;
+      const maxTarget = Math.min(targetOther, 50); // Max 50 satıcı sınırla
+
       const getOfferCount = async () => {
         const bySection = await page.$$('#aod-offer-list > div.a-section').then(els => els.length).catch(() => 0);
         if (bySection > 0) return bySection;
@@ -3716,50 +3717,54 @@ class PlaywrightService {
         const byAny = await page.$$('#aod-offer-list > div[id^="aod-offer"], #aod-offer-list > *').then(els => els.length).catch(() => 0);
         return byAny;
       };
-      for (let scrollRound = 0; scrollRound < 25; scrollRound++) {
-        const currentCount = await getOfferCount();
-        if (currentCount >= targetOther) break;
-        try {
-          await page.evaluate(() => {
-            const list = document.querySelector('#aod-offer-list');
-            if (list) list.scrollTop = list.scrollHeight;
-            const container = document.querySelector('#aod-container, #all-offers-display');
-            if (container) container.scrollTop = container.scrollHeight;
-            let el = list || container;
-            while (el && el.parentElement) {
-              if (el.scrollHeight > el.clientHeight) {
-                el.scrollTop = el.scrollHeight;
-              }
-              el = el.parentElement;
-            }
-          });
-          await this.safeWait(page, 1800);
-        } catch (e) { break; }
-      }
-      // KRİTİK: Artan scroll — lazy-load için küçük adımlarla scroll (bazı sayfalarda sadece tam scroll yetmiyor)
+
+      // OPTİMİZE: Tek döngü ile daha akıllı scroll - max 12 adım, erken çıkış
       let prevCount = 0;
       let noIncreaseRounds = 0;
-      for (let step = 0; step < 20 && noIncreaseRounds < 6; step++) {
-        const count = await getOfferCount();
-        if (count >= targetOther) break;
-        if (count <= prevCount) noIncreaseRounds++; else noIncreaseRounds = 0;
-        prevCount = count;
+      const maxScrollRounds = 12; // Önceden 25+20+12=57, şimdi 12
+
+      for (let round = 0; round < maxScrollRounds && noIncreaseRounds < 4; round++) {
+        const currentCount = await getOfferCount();
+
+        // Erken çıkış koşulları
+        if (currentCount >= maxTarget) break;
+        if (currentCount >= 30 && targetOther <= 30) break; // Yeterli sayıda satıcı varsa çık
+
+        if (currentCount <= prevCount) {
+          noIncreaseRounds++;
+        } else {
+          noIncreaseRounds = 0;
+        }
+        prevCount = currentCount;
+
         try {
+          // Daha hızlı scroll: büyük adım + scrollIntoView
           await page.evaluate(() => {
             const list = document.querySelector('#aod-offer-list');
             const container = document.querySelector('#aod-container, #all-offers-display');
+
+            // Büyük adımda scroll
             [list, container].filter(Boolean).forEach(el => {
               if (el.scrollHeight > el.clientHeight) {
-                el.scrollTop = Math.min(el.scrollTop + 400, el.scrollHeight);
+                el.scrollTop = Math.min(el.scrollTop + 800, el.scrollHeight); // 400'den 800'e
               }
             });
+
+            // Son element görünür yap
             const lastChild = list ? list.lastElementChild : null;
             if (lastChild) lastChild.scrollIntoView({ block: 'end', behavior: 'auto' });
           });
-          await this.safeWait(page, 2500);
-        } catch (e) { break; }
+
+          // OPTİMİZE: Bekleme süresini kısalt - 2500ms'den 1000ms'ye
+          await this.safeWait(page, 1000);
+        } catch (e) {
+          console.warn(`⚠️ [Playwright] Scroll hatası (round ${round}): ${e.message}`);
+          break;
+        }
       }
-      await this.safeWait(page, 1500);
+
+      // Son scroll ve kısa bekleme
+      await this.safeWait(page, 500);
 
       // Tüm seller offer'larını çek - KRİTİK: Sidebar'dan tüm bilgileri çek (ilk 2 değil, hedef sayısına kadar)
       const sellers = [];
@@ -3788,16 +3793,18 @@ class PlaywrightService {
           if (alt.length > offerElements.length) offerElements = alt;
         }
         if (offerElements.length === 0) offerElements = await page.$$('#aod-offer-list > div[id^="aod-offer"], #aod-offer-list > *').catch(() => []);
-        for (let retry = 0; offerElements.length < targetOther && retry < 12; retry++) {
+        // OPTİMİZE: Retry döngüsünü kısalt - max 3 retry, daha kısa bekleme
+        for (let retry = 0; offerElements.length < Math.min(targetOther, 30) && retry < 3; retry++) {
           await page.evaluate(() => {
             const list = document.querySelector('#aod-offer-list');
             const container = document.querySelector('#aod-container, #all-offers-display');
             [list, container].filter(Boolean).forEach(el => { el.scrollTop = el.scrollHeight; });
           });
-          await this.safeWait(page, 2000);
+          // OPTİMİZE: 2000ms'den 800ms'ye bekleme
+          await this.safeWait(page, 800);
           offerElements = await page.$$('#aod-offer-list > div.a-section').catch(() => []);
           if (offerElements.length === 0) offerElements = await page.$$('#aod-offer-list > div').catch(() => []);
-          if (offerElements.length < targetOther) {
+          if (offerElements.length < Math.min(targetOther, 30)) {
             const alt = await page.$$('#aod-offer-list div.a-section').catch(() => []);
             if (alt.length > offerElements.length) offerElements = alt;
           }
@@ -3816,7 +3823,8 @@ class PlaywrightService {
             const container = document.querySelector('#aod-container, #all-offers-display');
             [list, container].filter(Boolean).forEach(el => { el.scrollTop = el.scrollHeight; });
           });
-          await this.safeWait(page, 2000);
+          // OPTİMİZE: 2000ms'den 800ms'ye
+          await this.safeWait(page, 800);
         };
         const getOfferList = async () => {
           let list = await page.$$('#aod-offer-list > div.a-section').catch(() => []);
