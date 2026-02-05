@@ -3752,13 +3752,15 @@ class PlaywrightService {
       const maxTarget = Math.min(Math.max(targetOther, 25), 50); // 25-50 arası sınırla
 
       const getOfferCount = async () => {
-        // KRİTİK: Sadece gerçek offer satırlarını say
+        // KRİTİK: Sadece gerçek offer satırlarını say (.aod-offer)
+        const byAod = await page.$$('#aod-offer-list .aod-offer, #aod-container .aod-offer, #all-offers-display .aod-offer, .aod-offer')
+          .then(els => els.length)
+          .catch(() => 0);
+        if (byAod > 0) return byAod;
         const byId = await page.$$('#aod-offer-list > div[id^="aod-offer-"]').then(els => els.length).catch(() => 0);
         if (byId > 0) return byId;
         const byData = await page.$$('#aod-offer-list [data-csa-c-type="item"]').then(els => els.length).catch(() => 0);
-        if (byData > 0) return byData;
-        const bySection = await page.$$('#aod-offer-list > div.a-section').then(els => els.length).catch(() => 0);
-        return bySection;
+        return byData;
       };
 
       // OPTİMİZE: Tek döngü ile daha akıllı scroll - max 12 adım, erken çıkış
@@ -3829,14 +3831,14 @@ class PlaywrightService {
         }
         
         // Diğer offer'ları bul — hem doğrudan çocuk hem liste içi .a-section; hedef sayıya kadar scroll + tekrar dene
-        let offerElements = await page.$$('#aod-offer-list > div[id^="aod-offer-"]').catch(() => []);
+        let offerElements = await page.$$('#aod-offer-list .aod-offer, #aod-container .aod-offer, #all-offers-display .aod-offer, .aod-offer').catch(() => []);
+        if (offerElements.length === 0) offerElements = await page.$$('#aod-offer-list > div[id^="aod-offer-"]').catch(() => []);
         if (offerElements.length === 0) offerElements = await page.$$('#aod-offer-list [data-csa-c-type="item"]').catch(() => []);
-        if (offerElements.length === 0) offerElements = await page.$$('#aod-offer-list > div.a-section').catch(() => []);
         if (offerElements.length < targetOther) {
-          const alt = await page.$$('#aod-offer-list > div[id^="aod-offer-"], #aod-offer-list [data-csa-c-type="item"]').catch(() => []);
+          const alt = await page.$$('#aod-offer-list .aod-offer, #aod-container .aod-offer, #all-offers-display .aod-offer, #aod-offer-list > div[id^="aod-offer-"], #aod-offer-list [data-csa-c-type="item"]').catch(() => []);
           if (alt.length > offerElements.length) offerElements = alt;
         }
-        if (offerElements.length === 0) offerElements = await page.$$('#aod-offer-list > div[id^="aod-offer-"]').catch(() => []);
+        if (offerElements.length === 0) offerElements = await page.$$('#aod-offer-list .aod-offer, #aod-container .aod-offer, #all-offers-display .aod-offer, .aod-offer').catch(() => []);
         // OPTİMİZE: Retry döngüsünü kısalt - max 3 retry, daha kısa bekleme
         for (let retry = 0; offerElements.length < Math.min(targetOther, 30) && retry < 3; retry++) {
           await page.evaluate(() => {
@@ -3846,14 +3848,14 @@ class PlaywrightService {
           });
           // OPTİMİZE: 2000ms'den 800ms'ye bekleme
           await this.safeWait(page, 800);
-          offerElements = await page.$$('#aod-offer-list > div[id^="aod-offer-"]').catch(() => []);
+          offerElements = await page.$$('#aod-offer-list .aod-offer, #aod-container .aod-offer, #all-offers-display .aod-offer, .aod-offer').catch(() => []);
+          if (offerElements.length === 0) offerElements = await page.$$('#aod-offer-list > div[id^="aod-offer-"]').catch(() => []);
           if (offerElements.length === 0) offerElements = await page.$$('#aod-offer-list [data-csa-c-type="item"]').catch(() => []);
-          if (offerElements.length === 0) offerElements = await page.$$('#aod-offer-list > div.a-section').catch(() => []);
           if (offerElements.length < Math.min(targetOther, 30)) {
-            const alt = await page.$$('#aod-offer-list > div[id^="aod-offer-"], #aod-offer-list [data-csa-c-type="item"]').catch(() => []);
+            const alt = await page.$$('#aod-offer-list .aod-offer, #aod-container .aod-offer, #all-offers-display .aod-offer, #aod-offer-list > div[id^="aod-offer-"], #aod-offer-list [data-csa-c-type="item"]').catch(() => []);
             if (alt.length > offerElements.length) offerElements = alt;
           }
-          if (offerElements.length === 0) offerElements = await page.$$('#aod-offer-list > div[id^="aod-offer-"]').catch(() => []);
+          if (offerElements.length === 0) offerElements = await page.$$('#aod-offer-list .aod-offer, #aod-container .aod-offer, #all-offers-display .aod-offer, .aod-offer').catch(() => []);
         }
         // KRİTİK: totalSellers düşük/yanlış olabilir; DOM'daki sayıyı ve minimum 25'i baz al
         const maxOther = Math.min(Math.max(totalSellers || 0, offerElements.length, 25), 50);
@@ -3871,9 +3873,9 @@ class PlaywrightService {
           await this.safeWait(page, 800);
         };
         const getOfferList = async () => {
-          let list = await page.$$('#aod-offer-list > div[id^="aod-offer-"]').catch(() => []);
+          let list = await page.$$('#aod-offer-list .aod-offer, #aod-container .aod-offer, #all-offers-display .aod-offer, .aod-offer').catch(() => []);
+          if (list.length === 0) list = await page.$$('#aod-offer-list > div[id^="aod-offer-"]').catch(() => []);
           if (list.length === 0) list = await page.$$('#aod-offer-list [data-csa-c-type="item"]').catch(() => []);
-          if (list.length === 0) list = await page.$$('#aod-offer-list > div.a-section').catch(() => []);
           return list;
         };
         while (processedCount < maxOther) {
