@@ -4303,18 +4303,18 @@ class PlaywrightService {
     try {
       const otherSellers = [];
 
-      // AOD offer list'ini bekle - çok kısa timeout
+      // AOD offer list'ini bekle - ultra kısa timeout
       console.log('⏳ [Seller Playwright] AOD offer list bekleniyor...');
-      await page.waitForSelector('#aod-offer-list .aod-offer, .aod-offer', { timeout: 2000 }).catch(() => {
+      await page.waitForSelector('#aod-offer-list .aod-offer, .aod-offer', { timeout: 1000 }).catch(() => {
         console.log('⚠️ [Seller Playwright] AOD offer list bulunamadı, sadece buybox satıcısı var');
         return otherSellers;
       });
       console.log('✅ [Seller Playwright] AOD offer list bulundu');
 
-      // Diğer satıcıları çıkar - sadece 2 satıcı çıkar (çok hızlı olsun)
+      // Diğer satıcıları çıkar - sadece 1 satıcı çıkar (ultra hızlı olsun)
       const offers = await page.$$eval('#aod-offer-list .aod-offer, #aod-container .aod-offer, .aod-offer', (elements) => {
         console.log(`Found ${elements.length} seller elements on AOD page`);
-        return elements.slice(0, 2).map((el, index) => { // Sadece ilk 2 satıcıyı al (çok hızlı)
+        return elements.slice(0, 1).map((el, index) => { // Sadece ilk 1 satıcıyı al (ultra hızlı)
           try {
             // Fiyat
             const priceEl = el.querySelector('.a-price .a-offscreen') || el.querySelector('.a-color-price');
