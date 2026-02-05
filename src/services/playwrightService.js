@@ -4297,15 +4297,15 @@ class PlaywrightService {
     try {
       const otherSellers = [];
 
-      // AOD offer list'ini bekle
-      await page.waitForSelector('#aod-offer-list, #aod-container #aod-offer, .aod-offer', { timeout: 10000 }).catch(() => {
+      // AOD offer list'ini bekle - daha kısa timeout
+      await page.waitForSelector('#aod-offer-list .aod-offer, .aod-offer', { timeout: 5000 }).catch(() => {
         console.log('⚠️ [Seller Playwright] AOD offer list bulunamadı, sadece buybox satıcısı var');
         return otherSellers;
       });
 
-      // Diğer satıcıları çıkar
+      // Diğer satıcıları çıkar - sadece ilk 3 satıcıyı hızlı çıkar
       const offers = await page.$$eval('#aod-offer-list .aod-offer, #aod-container .aod-offer, .aod-offer', (elements) => {
-        return elements.slice(0, 10).map((el, index) => { // İlk 10 satıcıyı al
+        return elements.slice(0, 3).map((el, index) => { // Sadece ilk 3 satıcıyı al (hızlı olsun)
           try {
             // Fiyat
             const priceEl = el.querySelector('.a-price .a-offscreen') || el.querySelector('.a-color-price');
