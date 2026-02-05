@@ -3394,7 +3394,20 @@ class PlaywrightService {
         }
       }
       
+      let aodAlreadyOpen = false;
       if (!newAndUsedLink) {
+        try {
+          const aodCount = await page.locator('#aod-offer-list .aod-offer, #aod-container .aod-offer, .aod-offer').count();
+          if (aodCount > 0) {
+            aodAlreadyOpen = true;
+            console.log(`✅ [Playwright] "New & Used" link bulunamadı ama AOD listesi açık (${aodCount} offer). Click atlanacak.`);
+          }
+        } catch (_) {
+          aodAlreadyOpen = false;
+        }
+      }
+
+      if (!newAndUsedLink && !aodAlreadyOpen) {
         console.warn(`⚠️ [Playwright] "New & Used" / "Other sellers" link bulunamadı - Sayfa URL: ${page.url()}`);
         console.log(`✅ [Playwright] Tek satıcılı ürün - Sadece buybox bilgileri döndürülüyor`);
         
@@ -3427,8 +3440,9 @@ class PlaywrightService {
         }
       }
       
-      // "New & Used" linkine/div'ine tıkla
+      // "New & Used" linkine/div'ine tıkla (AOD zaten açıksa click atlanır)
       // KRİTİK: Element görünür olmayabilir, href'den URL'yi al ve direkt git (daha güvenilir)
+      if (!aodAlreadyOpen) {
       console.log(`🖱️ [Playwright] "New & Used" elementine tıklanıyor...`);
       
       // Önce href'den URL'yi al (en güvenilir yöntem - element görünür olmasa bile çalışır)
@@ -4299,23 +4313,56 @@ class PlaywrightService {
    * AOD sayfasından diğer satıcıları çıkar
    */
   async extractOtherSellersFromAOD(page) {
-    console.log('🔍 [Seller Playwright] extractOtherSellersFromAOD başladı - ULTRA FAST MODE');
+    console.log('🔍 [Seller Playwright] extractOtherSellersFromAOD başladı - FULL MODE');
     try {
       const otherSellers = [];
 
-      // AOD offer list'ini bekle - hiç bekleme, hemen dön
-      console.log('⚡ [Seller Playwright] AOD offer list kontrol ediliyor...');
-      const selectorExists = await page.locator('#aod-offer-list .aod-offer, .aod-offer').count().then(count => count > 0);
+      // AOD offer list'ini bekle
+      console.log('⏳ [Seller Playwright] AOD offer list bekleniyor...');
+      const selectorExists = await page
+        .locator('#aod-offer-list .aod-offer, #aod-container .aod-offer, .aod-offer')
+        .count()
+        .then(count => count > 0);
       if (!selectorExists) {
-        console.log('⚠️ [Seller Playwright] AOD offer list bulunamadı, sadece buybox satıcısı var');
-        return otherSellers;
+        try {
+          await page.waitForSelector('#aod-offer-list .aod-offer, #aod-container .aod-offer, .aod-offer', { timeout: 12000, state: 'attached' });
+        } catch (_) {
+          console.log('⚠️ [Seller Playwright] AOD offer list bulunamadı, sadece buybox satıcısı var');
+          return otherSellers;
+        }
       }
       console.log('✅ [Seller Playwright] AOD offer list bulundu');
 
-      // Diğer satıcıları çıkar - sadece 1 satıcı çıkar (ultra hızlı olsun)
+      // Lazy-load olabilecek satıcılar için scroll dene (sayfa veya container)
+      try {
+        let lastCount = 0;
+        for (let i = 0; i < 8; i++) {
+          const countNow = await page.locator('#aod-offer-list .aod-offer, #aod-container .aod-offer, .aod-offer').count();
+          if (countNow > lastCount) {
+            lastCount = countNow;
+          } else if (i >= 2) {
+            break;
+          }
+          await page.evaluate(() => {
+            const container = document.querySelector('#aod-offer-list') ||
+              document.querySelector('#aod-container') ||
+              document.querySelector('#all-offers-display');
+            if (container) {
+              container.scrollTop = container.scrollHeight;
+            } else {
+              window.scrollTo(0, document.body.scrollHeight);
+            }
+          }).catch(() => {});
+          await new Promise(r => setTimeout(r, 1200));
+        }
+      } catch (_) {
+        // Scroll hatası önemli değil, devam
+      }
+
+      // Diğer satıcıları çıkar - tüm satıcılar
       const offers = await page.$$eval('#aod-offer-list .aod-offer, #aod-container .aod-offer, .aod-offer', (elements) => {
         console.log(`Found ${elements.length} seller elements on AOD page`);
-        return elements.slice(0, 3).map((el, index) => { // İlk 3 satıcıyı al (hızlı ama yeterli)
+        return elements.map((el, index) => {
           try {
             // Fiyat
             const priceEl = el.querySelector('.a-price .a-offscreen') || el.querySelector('.a-color-price');
