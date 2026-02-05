@@ -1337,7 +1337,7 @@ class PlaywrightService {
         // Buybox container'ının yüklenmesini bekle
         try {
           await page.waitForSelector('#desktop_buybox, #buybox, #qualifiedBuybox, #apex_offerDisplay_single_desktop, #apex_offerDisplay_desktop', { 
-            timeout: 25000, // 20s -> 25s (Railway proxy 504 önleme) 
+            timeout: 35000, // 20s -> 35s (504 önleme) 
             state: 'attached' 
           });
           console.log(`✅ [Playwright] Buybox container yüklendi`);
@@ -3098,7 +3098,7 @@ class PlaywrightService {
       // İlk navigasyon: ülke seçimi gerekiyorsa baseUrl, değilse direkt AOD
       if (targetCountry && !usePool && !opts.sharedPage) {
         console.log(`🌐 [Playwright] Amazon ana sayfa açılıyor (ülke seçimi için): ${baseUrl}`);
-        await page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }); // 30s -> 30s (Railway proxy 504 önleme)
+        await page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 60000 }); // 30s -> 60s (504 önleme)
         await this.safeWait(page, 1500);
         console.log(`🌍 [Playwright] Ülke ve para birimi seçimi yapılıyor: ${targetCountry}`);
         const countrySelectionResult = await this.selectCountryAndCurrency(page, targetCountry, sourceMarketplace, productUrl);
@@ -3115,7 +3115,7 @@ class PlaywrightService {
       let gotoOk = false;
       for (let attempt = 1; attempt <= 2 && !gotoOk; attempt++) {
         try {
-          await page.goto(directAodUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }); // 35s -> 30s (Railway proxy 504 önleme)
+          await page.goto(directAodUrl, { waitUntil: 'domcontentloaded', timeout: 60000 }); // 35s -> 60s (504 önleme)
           gotoOk = true;
         } catch (gotoErr) {
           if (attempt < 2 && (gotoErr.message?.includes('Timeout') || gotoErr.message?.includes('timeout'))) {
@@ -3170,7 +3170,7 @@ class PlaywrightService {
         const aodContainer = await page.$('#aod-offer-list, #aod-pinned-offer, #aod-container, #all-offers-display').catch(() => null);
         if (!aodContainer) {
           console.warn(`⚠️ [Playwright] AOD container direct URL ile bulunamadı, PDP'den "New & Used" ile açılıyor...`);
-          await page.goto(productUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }); // 35s -> 30s (Railway proxy 504 önleme)
+          await page.goto(productUrl, { waitUntil: 'domcontentloaded', timeout: 60000 }); // 35s -> 60s (504 önleme)
           await this.safeWait(page, 2500);
           let newAndUsedLink = await page.$('a#aod-ingress-link').catch(() => null);
           if (!newAndUsedLink) {
@@ -3194,7 +3194,7 @@ class PlaywrightService {
               if (href.includes('#') && !href.includes('/gp/offer-listing/')) {
                 const aodUrl = `${baseUrl}/gp/offer-listing/${asin}?condition=NEW&ie=UTF8`;
                 console.log(`🔗 [Playwright] Hash link tespit edildi, offer-listing URL'ye gidiliyor: ${aodUrl}`);
-                await page.goto(aodUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }); // 35s -> 30s (Railway proxy 504 önleme)
+                await page.goto(aodUrl, { waitUntil: 'domcontentloaded', timeout: 60000 }); // 35s -> 60s (504 önleme)
               } else {
                 console.log(`🔗 [Playwright] New & Used href ile gidiliyor: ${href.substring(0, 80)}...`);
                 await page.goto(href, { waitUntil: 'domcontentloaded', timeout: 35000 });
@@ -3588,8 +3588,8 @@ class PlaywrightService {
       // AOD (All Offers Display) container'ını bekle - KRİTİK: Sidebar açılması için bekle
       console.log(`🛒 [Playwright] Seller listesi container'ı bekleniyor (sidebar açılması için)...`);
       try {
-        // Önce sidebar container'ını bekle (timeout 25s — Railway proxy 504 önleme)
-        await page.waitForSelector('#all-offers-display, #aod-container, #aod-offer-list, #aod-offer, #aod-pinned-offer', { timeout: 25000, state: 'visible' });
+        // Önce sidebar container'ını bekle (timeout 45s — yavaş sayfalarda da görünsün, 504 önleme)
+        await page.waitForSelector('#all-offers-display, #aod-container, #aod-offer-list, #aod-offer, #aod-pinned-offer', { timeout: 45000, state: 'visible' });
         console.log(`✅ [Playwright] Seller listesi container bulundu`);
         
         // KRİTİK: Sidebar'ın tamamen yüklenmesi için ek bekleme
