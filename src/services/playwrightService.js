@@ -2207,6 +2207,25 @@ class PlaywrightService {
         const cleaned = this.cleanAmazonHtml(value || '');
         return this.isInvalidSellerText(cleaned) ? null : cleaned;
       };
+
+      const extractSellerNameFromLinks = async (container) => {
+        if (!container) return null;
+        try {
+          const linkText = await container.$$eval('a', (anchors) => {
+            const pick = anchors
+              .map(a => ({ href: a.getAttribute('href') || '', text: (a.textContent || '').trim() }))
+              .filter(x => x.text && x.text.length >= 2)
+              .filter(x => !/^(Details|See more|See less|View Cart|Added|Updated|Not added)$/i.test(x.text))
+              .filter(x => /\/sp\?|\/gp\/aag\/|\/seller\?|seller=|\/stores\//i.test(x.href));
+            if (!pick.length) return null;
+            pick.sort((a, b) => b.text.length - a.text.length);
+            return pick[0].text;
+          }).catch(() => null);
+          return normalizeSellerText(linkText);
+        } catch (e) {
+          return null;
+        }
+      };
       
       // Condition (New, Used - Like New, Used - Very Good, vb.)
       let condition = null;
@@ -2506,13 +2525,22 @@ class PlaywrightService {
       try {
         // KRİTİK: Önce offer element içinden soldBy'yi bul
         // "Sold by ..." metninden çıkar
-        const soldByMatch = offerText.match(/Sold by\s+([^\n\r]+?)(?:\s+Seller rating|$)/i);
+        const soldByMatch = offerText.match(/Sold by\s+([^\n\r]+?)(?:\s+Seller rating|\s+Ships from|\s*$)/i);
         if (soldByMatch) {
           const normalized = normalizeSellerText(soldByMatch[1].trim());
           if (normalized) {
             soldBy = normalized;
             sellerName = soldBy;
             console.log(`✅ [Playwright] Offer ${index} soldBy offer element'inden çekildi: ${soldBy} -> sellerName: ${sellerName}`);
+          }
+        }
+
+        if (!soldBy) {
+          const linkSeller = await extractSellerNameFromLinks(offerElement);
+          if (linkSeller) {
+            soldBy = linkSeller;
+            sellerName = soldBy;
+            console.log(`✅ [Playwright] Offer ${index} soldBy link'ten çekildi: ${soldBy}`);
           }
         }
         
@@ -2749,6 +2777,18 @@ class PlaywrightService {
               // Full text parse başarısız
             }
           }
+
+          if (!soldBy && shipsFrom) {
+            const shipsFromLower = shipsFrom.toLowerCase().trim();
+            if (!shipsFromLower.includes('amazon')) {
+              const normalized = normalizeSellerText(shipsFrom);
+              if (normalized) {
+                soldBy = normalized;
+                sellerName = soldBy;
+                console.log(`✅ [Playwright] Offer ${index} soldBy shipsFrom'dan türetildi: ${soldBy}`);
+              }
+            }
+          }
           
           // NOTE: Non-pinned offer'larda global #aod-offer-soldBy kullanma.
           // Bu selector tıklanan tek offer'a ait olduğundan diğer offer'lara yanlış seller atıyordu.
@@ -2967,11 +3007,11 @@ class PlaywrightService {
       let isSBA = false;
       
       try {
-        const soldByLower = (soldBy || sellerName || '').toLowerCase().trim();
+        const sellerLower = (soldBy || sellerName || '').toLowerCase().trim();
         const shipsFromLower = (shipsFrom || '').toLowerCase().trim();
         
-        const isAmazonSeller = soldByLower.includes('amazon') || soldByLower === 'amazon.com' || soldByLower === 'amazon' || soldByLower === '';
-        const isAmazonShipping = shipsFromLower.includes('amazon') || shipsFromLower === 'amazon.com' || shipsFromLower === 'amazon' || shipsFromLower === '';
+        const isAmazonSeller = sellerLower.includes('amazon') || sellerLower === 'amazon.com' || sellerLower === 'amazon';
+        const isAmazonShipping = shipsFromLower.includes('amazon') || shipsFromLower === 'amazon.com' || shipsFromLower === 'amazon';
         
         if (isAmazonSeller && isAmazonShipping) {
           fulfillmentType = 'SBA';
@@ -3841,21 +3881,34 @@ class PlaywrightService {
           console.warn(`⚠️ [Playwright] Pinned offer çekilemedi: ${e.message}`);
         }
         
-        // Diğer offer'ları bul — sadece gerçek offer kartlarını hedefle (UI satırları/paging vs. hariç)
+        // Diğer offer'ları bul — farklı AOD DOM varyasyonlarını kapsa
         const offerSelectors = [
+          '#aod-offer-list > div[id^="aod-offer-"]',
+          '#aod-offer-list .aod-offer[id^="aod-offer-"]',
+          '#aod-offer-list [data-csa-c-type="item"][id^="aod-offer-"]',
+          '#aod-offer-list [data-aod-atc-action]',
           '#aod-offer-list .aod-offer',
+          '#aod-container [id^="aod-offer-"]',
+          '#aod-container [data-aod-atc-action]',
           '#aod-container .aod-offer',
+          '#all-offers-display [id^="aod-offer-"]',
+          '#all-offers-display [data-aod-atc-action]',
           '#all-offers-display .aod-offer',
           '.aod-offer',
-          '#aod-offer-list > div[id^="aod-offer-"]',
-          '#aod-offer-list [data-csa-c-type="item"]',
-          '#aod-offer-list > div.a-section',
-          '#aod-offer-list > div'
+          '[id^="aod-offer-"]'
         ];
         const selectOfferElements = async () => {
           for (const sel of offerSelectors) {
             const els = await page.$$(sel).catch(() => []);
-            if (els.length > 0) return els;
+            if (els.length === 0) continue;
+            // Eğer id'li elementler varsa onları tercih et
+            const filtered = [];
+            for (const el of els) {
+              const id = await el.getAttribute('id').catch(() => '');
+              if (id && id.startsWith('aod-offer-')) filtered.push(el);
+            }
+            if (filtered.length > 0) return filtered;
+            return els;
           }
           return [];
         };
