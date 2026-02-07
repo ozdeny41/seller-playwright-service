@@ -3,6 +3,9 @@
 Railway'de bağımsız olarak çalışan Playwright servisi. Seller bilgilerini çekmek için kullanılır.
 
 ## Özellikler
+- ✅ PostgreSQL database entegrasyonu - otomatik seller veri kaydetme
+- ✅ Sequelize ORM ile database işlemleri
+
 
 - ✅ Seller bilgileri çekme (Playwright ile)
 - ✅ Bağımsız Railway servisi
@@ -74,3 +77,46 @@ Backend ve Cloudflare gateway timeout (~20s) nedeniyle servis yanıt süresi kı
 - Queue: EAGAIN sonrası bekleme 120s → 35s; başarı sonrası 60s → 8s
 
 Bu sayede tek istek tipik olarak 20s altında tamamlanabilir. Yavaş veya captcha sayfalarında timeout ile hata dönebilir; backend tarafında retry veya cache kullanılabilir.
+
+## Database
+
+Servis, çektiği seller bilgilerini otomatik olarak PostgreSQL database'ine kaydeder.
+
+### Database Konfigürasyonu
+
+Environment Variables:
+```bash
+DATABASE_URL=postgresql://user:password@Seller-Postgres.railway.internal:5432/database_name
+```
+
+### Database İşlemleri
+
+```bash
+# Migration'ları çalıştır
+npm run db:migrate
+
+# Migration geri al
+npm run db:migrate:undo
+
+# Database bağlantısını test et
+npm run test:db
+```
+
+### Seller Tablosu Yapısı
+
+Database'de `Sellers` tablosu aşağıdaki alanları içerir:
+- `asin`: Ürün ASIN'i
+- `sellerName`: Satıcı adı
+- `soldBy`: "Sold by" bilgisi
+- `price`: Ürün fiyatı
+- `condition`: Ürün durumu (New, Used, etc.)
+- `isFBA`: FBA (Fulfillment by Amazon) durumu
+- `isFBM`: FBM (Fulfillment by Merchant) durumu
+- `shippingPrice`: Kargo ücreti
+- `deliveryDateText`: Teslimat tarihi metni
+- `sellerRating`: Satıcı puanı
+- `sellerRatingCount`: Değerlendirme sayısı
+- `positivePercentage`: Pozitif yorum yüzdesi
+- `marketplace`: Kaynak marketplace
+- `targetCountry`: Hedef ülke
+- `scrapedAt`: Veri çekilme tarihi
