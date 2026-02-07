@@ -1,4 +1,7 @@
 const express = require('express');
+const db = require('../models');
+const { sequelize } = require('../db');
+
 const router = express.Router();
 const playwrightService = require('../services/playwrightService');
 
@@ -30,6 +33,16 @@ class RequestQueue {
     if (this.lastEAGAINTime > 0 && timeSinceLastEAGAIN < eagainCooldownMs) {
       const waitTime = eagainCooldownMs - timeSinceLastEAGAIN;
       console.log(`⏳ [Queue] Son EAGAIN hatasından ${Math.round(timeSinceLastEAGAIN/1000)}s geçti, ${Math.round(waitTime/1000)}s daha bekleniyor...`);
+      
+      // Database'e kaydet (async, response'u bloklama)
+      setImmediate(async () => {
+        try {
+          await saveSellersToDatabase(result.data, asinList[0], sourceMarketplace, targetCountry);
+        } catch (dbError) {
+          console.error('❌ [Database] Seller bilgileri kaydedilemedi:', dbError.message);
+        }
+      });
+
       setTimeout(() => this.process(), waitTime);
       return;
     }
@@ -44,6 +57,16 @@ class RequestQueue {
       const result = await fn();
       if (this.eagainCount > 0) {
         console.log(`✅ [Queue] Başarılı işlem, EAGAIN sayacı sıfırlanıyor`);
+      
+      // Database'e kaydet (async, response'u bloklama)
+      setImmediate(async () => {
+        try {
+          await saveSellersToDatabase(result.data, asinList[0], sourceMarketplace, targetCountry);
+        } catch (dbError) {
+          console.error('❌ [Database] Seller bilgileri kaydedilemedi:', dbError.message);
+        }
+      });
+
         this.eagainCount = 0;
       }
       resolve(result);
@@ -94,13 +117,43 @@ router.post('/', async (req, res, next) => {
   const requestStartTime = Date.now();
   try {
     console.log(`📥 [Playwright Service] ========== POST /api/sellers REQUEST BAŞLADI ==========`);
+      
+      // Database'e kaydet (async, response'u bloklama)
+      setImmediate(async () => {
+        try {
+          await saveSellersToDatabase(result.data, asinList[0], sourceMarketplace, targetCountry);
+        } catch (dbError) {
+          console.error('❌ [Database] Seller bilgileri kaydedilemedi:', dbError.message);
+        }
+      });
+
     console.log(`📥 [Playwright Service] Request headers:`, {
+      
+      // Database'e kaydet (async, response'u bloklama)
+      setImmediate(async () => {
+        try {
+          await saveSellersToDatabase(result.data, asinList[0], sourceMarketplace, targetCountry);
+        } catch (dbError) {
+          console.error('❌ [Database] Seller bilgileri kaydedilemedi:', dbError.message);
+        }
+      });
+
       'content-type': req.headers['content-type'],
       'user-agent': req.headers['user-agent'],
       origin: req.headers.origin,
       referer: req.headers.referer
     });
     console.log(`📥 [Playwright Service] Request body:`, JSON.stringify(req.body, null, 2));
+      
+      // Database'e kaydet (async, response'u bloklama)
+      setImmediate(async () => {
+        try {
+          await saveSellersToDatabase(result.data, asinList[0], sourceMarketplace, targetCountry);
+        } catch (dbError) {
+          console.error('❌ [Database] Seller bilgileri kaydedilemedi:', dbError.message);
+        }
+      });
+
     
     const { asin, asins, sourceMarketplace = 'amazon.com', targetCountry, buyboxShippingWithImport } = req.body;
     const asinList = Array.isArray(asins)
@@ -112,9 +165,29 @@ router.post('/', async (req, res, next) => {
     const parsedBuyboxShippingWithImport = buyboxShippingWithImport != null ? parseFloat(buyboxShippingWithImport) : null;
     if (parsedBuyboxShippingWithImport != null) {
       console.log(`💰 [Playwright Service] Buybox shipping+import alındı: $${parsedBuyboxShippingWithImport}`);
+      
+      // Database'e kaydet (async, response'u bloklama)
+      setImmediate(async () => {
+        try {
+          await saveSellersToDatabase(result.data, asinList[0], sourceMarketplace, targetCountry);
+        } catch (dbError) {
+          console.error('❌ [Database] Seller bilgileri kaydedilemedi:', dbError.message);
+        }
+      });
+
     }
     
     console.log(`📥 [Playwright Service] POST /api/sellers request alındı:`, {
+      
+      // Database'e kaydet (async, response'u bloklama)
+      setImmediate(async () => {
+        try {
+          await saveSellersToDatabase(result.data, asinList[0], sourceMarketplace, targetCountry);
+        } catch (dbError) {
+          console.error('❌ [Database] Seller bilgileri kaydedilemedi:', dbError.message);
+        }
+      });
+
       asin: asin,
       asinCount: asinList.length,
       sourceMarketplace: sourceMarketplace,
@@ -133,11 +206,41 @@ router.post('/', async (req, res, next) => {
     }
     
     console.log(`📡 [Playwright Service] Seller info request başlatılıyor: ${asinList[0]} (${asinList.length} ASIN) from ${sourceMarketplace}`);
+      
+      // Database'e kaydet (async, response'u bloklama)
+      setImmediate(async () => {
+        try {
+          await saveSellersToDatabase(result.data, asinList[0], sourceMarketplace, targetCountry);
+        } catch (dbError) {
+          console.error('❌ [Database] Seller bilgileri kaydedilemedi:', dbError.message);
+        }
+      });
+
     console.log(`📊 [Queue] Queue durumu: ${requestQueue.running}/${requestQueue.maxConcurrent} çalışıyor, ${requestQueue.queue.length} bekliyor`);
+      
+      // Database'e kaydet (async, response'u bloklama)
+      setImmediate(async () => {
+        try {
+          await saveSellersToDatabase(result.data, asinList[0], sourceMarketplace, targetCountry);
+        } catch (dbError) {
+          console.error('❌ [Database] Seller bilgileri kaydedilemedi:', dbError.message);
+        }
+      });
+
     
     // KRİTİK: Queue'ya ekle - EAGAIN hatalarını önlemek için
     const result = await requestQueue.add(async () => {
       console.log(`🚀 [Queue] ${asinList[0]} (${asinList.length} ASIN) için seller bilgileri çekiliyor (${requestQueue.running}/${requestQueue.maxConcurrent}, queue: ${requestQueue.queue.length})`);
+      
+      // Database'e kaydet (async, response'u bloklama)
+      setImmediate(async () => {
+        try {
+          await saveSellersToDatabase(result.data, asinList[0], sourceMarketplace, targetCountry);
+        } catch (dbError) {
+          console.error('❌ [Database] Seller bilgileri kaydedilemedi:', dbError.message);
+        }
+      });
+
       try {
         if (asinList.length > 1) {
           return await playwrightService.getSellerInfoBatch(asinList, sourceMarketplace, targetCountry);
@@ -167,10 +270,40 @@ router.post('/', async (req, res, next) => {
       console.error(`❌ [Playwright Service] Servis yanıtı geçersiz (result: ${typeof result})`);
       const requestDuration = Date.now() - requestStartTime;
       console.log(`⏱️ [Playwright Service] Request süresi: ${requestDuration}ms`);
+      
+      // Database'e kaydet (async, response'u bloklama)
+      setImmediate(async () => {
+        try {
+          await saveSellersToDatabase(result.data, asinList[0], sourceMarketplace, targetCountry);
+        } catch (dbError) {
+          console.error('❌ [Database] Seller bilgileri kaydedilemedi:', dbError.message);
+        }
+      });
+
       console.log(`📥 [Playwright Service] ========== POST /api/sellers REQUEST TAMAMLANDI (HATA) ==========`);
+      
+      // Database'e kaydet (async, response'u bloklama)
+      setImmediate(async () => {
+        try {
+          await saveSellersToDatabase(result.data, asinList[0], sourceMarketplace, targetCountry);
+        } catch (dbError) {
+          console.error('❌ [Database] Seller bilgileri kaydedilemedi:', dbError.message);
+        }
+      });
+
       return res.status(500).json({ ok: false, error: 'No response from seller service' });
     }
     console.log(`📤 [Playwright Service] Seller info response hazırlanıyor:`, {
+      
+      // Database'e kaydet (async, response'u bloklama)
+      setImmediate(async () => {
+        try {
+          await saveSellersToDatabase(result.data, asinList[0], sourceMarketplace, targetCountry);
+        } catch (dbError) {
+          console.error('❌ [Database] Seller bilgileri kaydedilemedi:', dbError.message);
+        }
+      });
+
       success: result.success,
       hasData: !!result.data,
       sellersCount: result.data?.sellers?.length || 0,
@@ -186,10 +319,40 @@ router.post('/', async (req, res, next) => {
     });
     const requestDuration = Date.now() - requestStartTime;
     console.log(`⏱️ [Playwright Service] Request süresi: ${requestDuration}ms`);
+      
+      // Database'e kaydet (async, response'u bloklama)
+      setImmediate(async () => {
+        try {
+          await saveSellersToDatabase(result.data, asinList[0], sourceMarketplace, targetCountry);
+        } catch (dbError) {
+          console.error('❌ [Database] Seller bilgileri kaydedilemedi:', dbError.message);
+        }
+      });
+
     if (result.success) {
       const responsePayload = { ok: true, data: result.data };
       console.log(`✅ [Playwright Service] ========== POST /api/sellers REQUEST BAŞARILI ==========`);
+      
+      // Database'e kaydet (async, response'u bloklama)
+      setImmediate(async () => {
+        try {
+          await saveSellersToDatabase(result.data, asinList[0], sourceMarketplace, targetCountry);
+        } catch (dbError) {
+          console.error('❌ [Database] Seller bilgileri kaydedilemedi:', dbError.message);
+        }
+      });
+
       console.log(`📤 [Playwright Service] Response payload:`, {
+      
+      // Database'e kaydet (async, response'u bloklama)
+      setImmediate(async () => {
+        try {
+          await saveSellersToDatabase(result.data, asinList[0], sourceMarketplace, targetCountry);
+        } catch (dbError) {
+          console.error('❌ [Database] Seller bilgileri kaydedilemedi:', dbError.message);
+        }
+      });
+
         ok: responsePayload.ok,
         hasData: !!responsePayload.data,
         sellersCount: responsePayload.data?.sellers?.length || 0,
@@ -199,6 +362,16 @@ router.post('/', async (req, res, next) => {
       res.json(responsePayload);
     } else {
       console.log(`❌ [Playwright Service] ========== POST /api/sellers REQUEST BAŞARISIZ ==========`);
+      
+      // Database'e kaydet (async, response'u bloklama)
+      setImmediate(async () => {
+        try {
+          await saveSellersToDatabase(result.data, asinList[0], sourceMarketplace, targetCountry);
+        } catch (dbError) {
+          console.error('❌ [Database] Seller bilgileri kaydedilemedi:', dbError.message);
+        }
+      });
+
       res.status(result.status || 500).json({ 
         ok: false, 
         error: result.error || 'Failed to get seller information' 
@@ -209,7 +382,27 @@ router.post('/', async (req, res, next) => {
     console.error(`❌ [Playwright Service] Seller info error:`, error.message);
     console.error(`❌ [Playwright Service] Error stack:`, error.stack);
     console.log(`⏱️ [Playwright Service] Request süresi (hata): ${requestDuration}ms`);
+      
+      // Database'e kaydet (async, response'u bloklama)
+      setImmediate(async () => {
+        try {
+          await saveSellersToDatabase(result.data, asinList[0], sourceMarketplace, targetCountry);
+        } catch (dbError) {
+          console.error('❌ [Database] Seller bilgileri kaydedilemedi:', dbError.message);
+        }
+      });
+
     console.log(`📥 [Playwright Service] ========== POST /api/sellers REQUEST HATA İLE TAMAMLANDI ==========`);
+      
+      // Database'e kaydet (async, response'u bloklama)
+      setImmediate(async () => {
+        try {
+          await saveSellersToDatabase(result.data, asinList[0], sourceMarketplace, targetCountry);
+        } catch (dbError) {
+          console.error('❌ [Database] Seller bilgileri kaydedilemedi:', dbError.message);
+        }
+      });
+
     next(error);
   }
 });
@@ -231,11 +424,41 @@ router.get('/:asin', async (req, res, next) => {
     }
     
     console.log(`📡 [Playwright Service] Seller info request (GET): ${asin} from ${marketplace}`);
+      
+      // Database'e kaydet (async, response'u bloklama)
+      setImmediate(async () => {
+        try {
+          await saveSellersToDatabase(result.data, asinList[0], sourceMarketplace, targetCountry);
+        } catch (dbError) {
+          console.error('❌ [Database] Seller bilgileri kaydedilemedi:', dbError.message);
+        }
+      });
+
     console.log(`📊 [Queue] Queue durumu: ${requestQueue.running}/${requestQueue.maxConcurrent} çalışıyor, ${requestQueue.queue.length} bekliyor`);
+      
+      // Database'e kaydet (async, response'u bloklama)
+      setImmediate(async () => {
+        try {
+          await saveSellersToDatabase(result.data, asinList[0], sourceMarketplace, targetCountry);
+        } catch (dbError) {
+          console.error('❌ [Database] Seller bilgileri kaydedilemedi:', dbError.message);
+        }
+      });
+
     
     // KRİTİK: Queue'ya ekle - EAGAIN hatalarını önlemek için
     const result = await requestQueue.add(async () => {
       console.log(`🚀 [Queue] ${asin} için seller bilgileri çekiliyor (GET) (${requestQueue.running}/${requestQueue.maxConcurrent}, queue: ${requestQueue.queue.length})`);
+      
+      // Database'e kaydet (async, response'u bloklama)
+      setImmediate(async () => {
+        try {
+          await saveSellersToDatabase(result.data, asinList[0], sourceMarketplace, targetCountry);
+        } catch (dbError) {
+          console.error('❌ [Database] Seller bilgileri kaydedilemedi:', dbError.message);
+        }
+      });
+
       try {
         return await playwrightService.getSellerInfo(asin, marketplace, targetCountry);
       } catch (error) {
@@ -289,5 +512,50 @@ router.get('/health', (req, res) => {
     eagainCount: requestQueue ? requestQueue.eagainCount : 0
   });
 });
+
+module.exports = router;
+
+/**
+ * Seller bilgilerini PostgreSQL database'ine kaydet
+ */
+async function saveSellersToDatabase(data, asin, sourceMarketplace, targetCountry) {
+  if (!data || !data.sellers || !Array.isArray(data.sellers)) {
+    console.warn('⚠️ [Database] Geçersiz seller verisi, kaydedilmiyor');
+    return;
+  }
+
+  try {
+    console.log(`💾 [Database] ${data.sellers.length} seller bilgisi kaydediliyor: ${asin}`);
+
+    const sellerRecords = data.sellers.map((seller, index) => ({
+      asin: asin,
+      sellerName: seller.sellerName || seller.soldBy || null,
+      soldBy: seller.soldBy || seller.sellerName || null,
+      price: seller.price || null,
+      condition: seller.condition || 'New',
+      isFBA: seller.isFBA || false,
+      isFBM: seller.isFBM || !seller.isFBA,
+      shippingPrice: seller.shippingPrice || seller.standardShippingPrice || null,
+      deliveryDateText: seller.deliveryDateText || seller.standardDeliveryDateText || null,
+      sellerRating: seller.sellerRating || null,
+      sellerRatingCount: seller.sellerRatingCount || null,
+      positivePercentage: seller.positivePercentage || null,
+      marketplace: sourceMarketplace || 'amazon.com',
+      targetCountry: targetCountry || null,
+      scrapedAt: new Date()
+    }));
+
+    // Bulk insert ile tüm seller'ları kaydet
+    await db.Seller.bulkCreate(sellerRecords, {
+      updateOnDuplicate: ['price', 'shippingPrice', 'deliveryDateText', 'sellerRating', 'sellerRatingCount', 'positivePercentage', 'scrapedAt']
+    });
+
+    console.log(`✅ [Database] ${sellerRecords.length} seller başarıyla kaydedildi: ${asin}`);
+
+  } catch (error) {
+    console.error(`❌ [Database] Seller kaydetme hatası (${asin}):`, error.message);
+    throw error;
+  }
+}
 
 module.exports = router;

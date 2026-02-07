@@ -1,6 +1,8 @@
 const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
+const { sequelize, testConnection, runMigrations } = require('../db');
+const db = require('../models');
 
 dotenv.config();
 
@@ -139,6 +141,18 @@ app.use((err, req, res, next) => {
 
 // Start server
 app.listen(PORT, '0.0.0.0', () => {
+// Database bağlantısını başlat
+(async () => {
+  console.log('🔄 [Server] Database bağlantısı başlatılıyor...');
+  const connected = await testConnection();
+  if (connected) {
+    await runMigrations();
+    console.log('✅ [Server] Database hazır');
+  } else {
+    console.error('❌ [Server] Database bağlantısı başarısız, ancak server devam edecek');
+  }
+})();
+
   console.log(`🚀 [Seller Playwright] Server running on port ${PORT}`);
   console.log(`📡 [Seller Playwright] Health check: http://0.0.0.0:${PORT}/health`);
   console.log(`📡 [Seller Playwright] Batch endpoint: /api/playwright/select-country-for-asin-batch (20 sekme, ülke seçimi, shipping+seller)`);
