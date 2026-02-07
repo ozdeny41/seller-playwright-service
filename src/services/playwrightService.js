@@ -1545,6 +1545,7 @@ class PlaywrightService {
       let price = null;
       let priceText = null;
       let shippingPrice = null;
+      let shippingWithImport = null;
       let shippingText = null;
       try {
         // Fiyat: div#corePrice_feature_div içindeki price
@@ -2153,6 +2154,7 @@ class PlaywrightService {
           standardDeliveryDateText: cleanBuyboxStandardDeliveryDate || null, // Frontend için text field
           expressDeliveryDate: cleanBuyboxExpressDeliveryDate || null,
           expressDeliveryDateText: cleanBuyboxExpressDeliveryDate || null, // Frontend için text field
+          shippingWithImport: shippingWithImport,
           // KRİTİK: Satıcı değerlendirme bilgileri (buybox için genellikle yok ama field'ları ekle)
           sellerRating: null, // Buybox'ta satıcı rating genellikle gösterilmiyor
           sellerRatingCount: null,
@@ -2790,6 +2792,7 @@ class PlaywrightService {
       // Delivery date, shipping price, "cannot be shipped" tespiti
       let deliveryDate = null;
       let shippingPrice = null;
+      let shippingWithImport = null;
       let expressDeliveryDate = null;
       let cannotShipToSelectedCountry = false;
       let deliveryMessage = null; // Modal'da: "Seçili ülkeye gönderilmiyor" veya teslimat metni
@@ -4235,6 +4238,7 @@ class PlaywrightService {
         return { success: false, shippingData: null, sellersData: null, error: 'Buybox bilgisi çekilemedi' };
       }
       const shippingData = {
+        shippingWithImport: buyboxData.shippingWithImport || null,
         standardShippingPrice: buyboxData.standardShippingPrice || buyboxData.shippingPrice || null,
         expressShippingPrice: buyboxData.expressShippingPrice || null,
         standardDeliveryDate: buyboxData.standardDeliveryDate || buyboxData.standardDeliveryDateText || null,
@@ -4283,8 +4287,11 @@ class PlaywrightService {
           expressDeliveryDate: cleanBuyboxExpressDeliveryDate,
           shippingPrice: buyboxData.standardShippingPrice || buyboxData.shippingPrice,
           standardShippingPrice: buyboxData.standardShippingPrice || buyboxData.shippingPrice,
-          expressShippingPrice: buyboxData.expressShippingPrice
+          expressShippingPrice: buyboxData.expressShippingPrice,
+          shippingWithImport: buyboxData.shippingWithImport || null,
+          importCharge: buyboxData.shippingWithImport importCharge: buyboxData.shippingWithImport           expressShippingPrice: buyboxData.expressShippingPrice          expressShippingPrice: buyboxData.expressShippingPrice buyboxData.standardShippingPrice ? buyboxData.shippingWithImport - buyboxData.standardShippingPrice : nullimportCharge: buyboxData.shippingWithImport           expressShippingPrice: buyboxData.expressShippingPrice          expressShippingPrice: buyboxData.expressShippingPrice buyboxData.standardShippingPrice ? buyboxData.shippingWithImport - buyboxData.standardShippingPrice : null buyboxData.standardShippingPrice ? buyboxData.shippingWithImport - buyboxData.standardShippingPrice : null
         }, ...otherSellers],
+        shippingWithImport: buyboxData.shippingWithImport || null,
         marketplace: sourceMarketplace,
         updatedAt: new Date().toISOString()
       };
