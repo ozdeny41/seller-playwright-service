@@ -35,6 +35,12 @@ class RequestQueue {
       console.log(`⏳ [Queue] Son EAGAIN hatasından ${Math.round(timeSinceLastEAGAIN/1000)}s geçti, ${Math.round(waitTime/1000)}s daha bekleniyor...`);
       
       // Database'e kaydet (async, response'u bloklama)
+      // Database bağlantısı kontrolü
+      if (!db.sequelize || !db.sequelize.connectionManager.hasConnection()) {
+        console.warn('⚠️ [Database] Database bağlantısı yok, seller bilgileri kaydedilmiyor');
+        return;
+      }
+
       setImmediate(async () => {
         try {
           await saveSellersToDatabase(result.data, asinList[0], sourceMarketplace, targetCountry);
@@ -59,6 +65,12 @@ class RequestQueue {
         console.log(`✅ [Queue] Başarılı işlem, EAGAIN sayacı sıfırlanıyor`);
       
       // Database'e kaydet (async, response'u bloklama)
+      // Database bağlantısı kontrolü
+      if (!db.sequelize || !db.sequelize.connectionManager.hasConnection()) {
+        console.warn('⚠️ [Database] Database bağlantısı yok, seller bilgileri kaydedilmiyor');
+        return;
+      }
+
       setImmediate(async () => {
         try {
           await saveSellersToDatabase(result.data, asinList[0], sourceMarketplace, targetCountry);
@@ -119,6 +131,12 @@ router.post('/', async (req, res, next) => {
     console.log(`📥 [Playwright Service] ========== POST /api/sellers REQUEST BAŞLADI ==========`);
       
       // Database'e kaydet (async, response'u bloklama)
+      // Database bağlantısı kontrolü
+      if (!db.sequelize || !db.sequelize.connectionManager.hasConnection()) {
+        console.warn('⚠️ [Database] Database bağlantısı yok, seller bilgileri kaydedilmiyor');
+        return;
+      }
+
       setImmediate(async () => {
         try {
           await saveSellersToDatabase(result.data, asinList[0], sourceMarketplace, targetCountry);
@@ -130,6 +148,12 @@ router.post('/', async (req, res, next) => {
     console.log(`📥 [Playwright Service] Request headers:`, {
       
       // Database'e kaydet (async, response'u bloklama)
+      // Database bağlantısı kontrolü
+      if (!db.sequelize || !db.sequelize.connectionManager.hasConnection()) {
+        console.warn('⚠️ [Database] Database bağlantısı yok, seller bilgileri kaydedilmiyor');
+        return;
+      }
+
       setImmediate(async () => {
         try {
           await saveSellersToDatabase(result.data, asinList[0], sourceMarketplace, targetCountry);
@@ -146,6 +170,12 @@ router.post('/', async (req, res, next) => {
     console.log(`📥 [Playwright Service] Request body:`, JSON.stringify(req.body, null, 2));
       
       // Database'e kaydet (async, response'u bloklama)
+      // Database bağlantısı kontrolü
+      if (!db.sequelize || !db.sequelize.connectionManager.hasConnection()) {
+        console.warn('⚠️ [Database] Database bağlantısı yok, seller bilgileri kaydedilmiyor');
+        return;
+      }
+
       setImmediate(async () => {
         try {
           await saveSellersToDatabase(result.data, asinList[0], sourceMarketplace, targetCountry);
@@ -167,6 +197,12 @@ router.post('/', async (req, res, next) => {
       console.log(`💰 [Playwright Service] Buybox shipping+import alındı: $${parsedBuyboxShippingWithImport}`);
       
       // Database'e kaydet (async, response'u bloklama)
+      // Database bağlantısı kontrolü
+      if (!db.sequelize || !db.sequelize.connectionManager.hasConnection()) {
+        console.warn('⚠️ [Database] Database bağlantısı yok, seller bilgileri kaydedilmiyor');
+        return;
+      }
+
       setImmediate(async () => {
         try {
           await saveSellersToDatabase(result.data, asinList[0], sourceMarketplace, targetCountry);
@@ -180,6 +216,12 @@ router.post('/', async (req, res, next) => {
     console.log(`📥 [Playwright Service] POST /api/sellers request alındı:`, {
       
       // Database'e kaydet (async, response'u bloklama)
+      // Database bağlantısı kontrolü
+      if (!db.sequelize || !db.sequelize.connectionManager.hasConnection()) {
+        console.warn('⚠️ [Database] Database bağlantısı yok, seller bilgileri kaydedilmiyor');
+        return;
+      }
+
       setImmediate(async () => {
         try {
           await saveSellersToDatabase(result.data, asinList[0], sourceMarketplace, targetCountry);
@@ -208,6 +250,12 @@ router.post('/', async (req, res, next) => {
     console.log(`📡 [Playwright Service] Seller info request başlatılıyor: ${asinList[0]} (${asinList.length} ASIN) from ${sourceMarketplace}`);
       
       // Database'e kaydet (async, response'u bloklama)
+      // Database bağlantısı kontrolü
+      if (!db.sequelize || !db.sequelize.connectionManager.hasConnection()) {
+        console.warn('⚠️ [Database] Database bağlantısı yok, seller bilgileri kaydedilmiyor');
+        return;
+      }
+
       setImmediate(async () => {
         try {
           await saveSellersToDatabase(result.data, asinList[0], sourceMarketplace, targetCountry);
@@ -219,6 +267,12 @@ router.post('/', async (req, res, next) => {
     console.log(`📊 [Queue] Queue durumu: ${requestQueue.running}/${requestQueue.maxConcurrent} çalışıyor, ${requestQueue.queue.length} bekliyor`);
       
       // Database'e kaydet (async, response'u bloklama)
+      // Database bağlantısı kontrolü
+      if (!db.sequelize || !db.sequelize.connectionManager.hasConnection()) {
+        console.warn('⚠️ [Database] Database bağlantısı yok, seller bilgileri kaydedilmiyor');
+        return;
+      }
+
       setImmediate(async () => {
         try {
           await saveSellersToDatabase(result.data, asinList[0], sourceMarketplace, targetCountry);
@@ -233,6 +287,12 @@ router.post('/', async (req, res, next) => {
       console.log(`🚀 [Queue] ${asinList[0]} (${asinList.length} ASIN) için seller bilgileri çekiliyor (${requestQueue.running}/${requestQueue.maxConcurrent}, queue: ${requestQueue.queue.length})`);
       
       // Database'e kaydet (async, response'u bloklama)
+      // Database bağlantısı kontrolü
+      if (!db.sequelize || !db.sequelize.connectionManager.hasConnection()) {
+        console.warn('⚠️ [Database] Database bağlantısı yok, seller bilgileri kaydedilmiyor');
+        return;
+      }
+
       setImmediate(async () => {
         try {
           await saveSellersToDatabase(result.data, asinList[0], sourceMarketplace, targetCountry);
@@ -272,6 +332,12 @@ router.post('/', async (req, res, next) => {
       console.log(`⏱️ [Playwright Service] Request süresi: ${requestDuration}ms`);
       
       // Database'e kaydet (async, response'u bloklama)
+      // Database bağlantısı kontrolü
+      if (!db.sequelize || !db.sequelize.connectionManager.hasConnection()) {
+        console.warn('⚠️ [Database] Database bağlantısı yok, seller bilgileri kaydedilmiyor');
+        return;
+      }
+
       setImmediate(async () => {
         try {
           await saveSellersToDatabase(result.data, asinList[0], sourceMarketplace, targetCountry);
@@ -283,6 +349,12 @@ router.post('/', async (req, res, next) => {
       console.log(`📥 [Playwright Service] ========== POST /api/sellers REQUEST TAMAMLANDI (HATA) ==========`);
       
       // Database'e kaydet (async, response'u bloklama)
+      // Database bağlantısı kontrolü
+      if (!db.sequelize || !db.sequelize.connectionManager.hasConnection()) {
+        console.warn('⚠️ [Database] Database bağlantısı yok, seller bilgileri kaydedilmiyor');
+        return;
+      }
+
       setImmediate(async () => {
         try {
           await saveSellersToDatabase(result.data, asinList[0], sourceMarketplace, targetCountry);
@@ -296,6 +368,12 @@ router.post('/', async (req, res, next) => {
     console.log(`📤 [Playwright Service] Seller info response hazırlanıyor:`, {
       
       // Database'e kaydet (async, response'u bloklama)
+      // Database bağlantısı kontrolü
+      if (!db.sequelize || !db.sequelize.connectionManager.hasConnection()) {
+        console.warn('⚠️ [Database] Database bağlantısı yok, seller bilgileri kaydedilmiyor');
+        return;
+      }
+
       setImmediate(async () => {
         try {
           await saveSellersToDatabase(result.data, asinList[0], sourceMarketplace, targetCountry);
@@ -321,6 +399,12 @@ router.post('/', async (req, res, next) => {
     console.log(`⏱️ [Playwright Service] Request süresi: ${requestDuration}ms`);
       
       // Database'e kaydet (async, response'u bloklama)
+      // Database bağlantısı kontrolü
+      if (!db.sequelize || !db.sequelize.connectionManager.hasConnection()) {
+        console.warn('⚠️ [Database] Database bağlantısı yok, seller bilgileri kaydedilmiyor');
+        return;
+      }
+
       setImmediate(async () => {
         try {
           await saveSellersToDatabase(result.data, asinList[0], sourceMarketplace, targetCountry);
@@ -334,6 +418,12 @@ router.post('/', async (req, res, next) => {
       console.log(`✅ [Playwright Service] ========== POST /api/sellers REQUEST BAŞARILI ==========`);
       
       // Database'e kaydet (async, response'u bloklama)
+      // Database bağlantısı kontrolü
+      if (!db.sequelize || !db.sequelize.connectionManager.hasConnection()) {
+        console.warn('⚠️ [Database] Database bağlantısı yok, seller bilgileri kaydedilmiyor');
+        return;
+      }
+
       setImmediate(async () => {
         try {
           await saveSellersToDatabase(result.data, asinList[0], sourceMarketplace, targetCountry);
@@ -345,6 +435,12 @@ router.post('/', async (req, res, next) => {
       console.log(`📤 [Playwright Service] Response payload:`, {
       
       // Database'e kaydet (async, response'u bloklama)
+      // Database bağlantısı kontrolü
+      if (!db.sequelize || !db.sequelize.connectionManager.hasConnection()) {
+        console.warn('⚠️ [Database] Database bağlantısı yok, seller bilgileri kaydedilmiyor');
+        return;
+      }
+
       setImmediate(async () => {
         try {
           await saveSellersToDatabase(result.data, asinList[0], sourceMarketplace, targetCountry);
@@ -364,6 +460,12 @@ router.post('/', async (req, res, next) => {
       console.log(`❌ [Playwright Service] ========== POST /api/sellers REQUEST BAŞARISIZ ==========`);
       
       // Database'e kaydet (async, response'u bloklama)
+      // Database bağlantısı kontrolü
+      if (!db.sequelize || !db.sequelize.connectionManager.hasConnection()) {
+        console.warn('⚠️ [Database] Database bağlantısı yok, seller bilgileri kaydedilmiyor');
+        return;
+      }
+
       setImmediate(async () => {
         try {
           await saveSellersToDatabase(result.data, asinList[0], sourceMarketplace, targetCountry);
@@ -384,6 +486,12 @@ router.post('/', async (req, res, next) => {
     console.log(`⏱️ [Playwright Service] Request süresi (hata): ${requestDuration}ms`);
       
       // Database'e kaydet (async, response'u bloklama)
+      // Database bağlantısı kontrolü
+      if (!db.sequelize || !db.sequelize.connectionManager.hasConnection()) {
+        console.warn('⚠️ [Database] Database bağlantısı yok, seller bilgileri kaydedilmiyor');
+        return;
+      }
+
       setImmediate(async () => {
         try {
           await saveSellersToDatabase(result.data, asinList[0], sourceMarketplace, targetCountry);
@@ -395,6 +503,12 @@ router.post('/', async (req, res, next) => {
     console.log(`📥 [Playwright Service] ========== POST /api/sellers REQUEST HATA İLE TAMAMLANDI ==========`);
       
       // Database'e kaydet (async, response'u bloklama)
+      // Database bağlantısı kontrolü
+      if (!db.sequelize || !db.sequelize.connectionManager.hasConnection()) {
+        console.warn('⚠️ [Database] Database bağlantısı yok, seller bilgileri kaydedilmiyor');
+        return;
+      }
+
       setImmediate(async () => {
         try {
           await saveSellersToDatabase(result.data, asinList[0], sourceMarketplace, targetCountry);
@@ -426,6 +540,12 @@ router.get('/:asin', async (req, res, next) => {
     console.log(`📡 [Playwright Service] Seller info request (GET): ${asin} from ${marketplace}`);
       
       // Database'e kaydet (async, response'u bloklama)
+      // Database bağlantısı kontrolü
+      if (!db.sequelize || !db.sequelize.connectionManager.hasConnection()) {
+        console.warn('⚠️ [Database] Database bağlantısı yok, seller bilgileri kaydedilmiyor');
+        return;
+      }
+
       setImmediate(async () => {
         try {
           await saveSellersToDatabase(result.data, asinList[0], sourceMarketplace, targetCountry);
@@ -437,6 +557,12 @@ router.get('/:asin', async (req, res, next) => {
     console.log(`📊 [Queue] Queue durumu: ${requestQueue.running}/${requestQueue.maxConcurrent} çalışıyor, ${requestQueue.queue.length} bekliyor`);
       
       // Database'e kaydet (async, response'u bloklama)
+      // Database bağlantısı kontrolü
+      if (!db.sequelize || !db.sequelize.connectionManager.hasConnection()) {
+        console.warn('⚠️ [Database] Database bağlantısı yok, seller bilgileri kaydedilmiyor');
+        return;
+      }
+
       setImmediate(async () => {
         try {
           await saveSellersToDatabase(result.data, asinList[0], sourceMarketplace, targetCountry);
@@ -451,6 +577,12 @@ router.get('/:asin', async (req, res, next) => {
       console.log(`🚀 [Queue] ${asin} için seller bilgileri çekiliyor (GET) (${requestQueue.running}/${requestQueue.maxConcurrent}, queue: ${requestQueue.queue.length})`);
       
       // Database'e kaydet (async, response'u bloklama)
+      // Database bağlantısı kontrolü
+      if (!db.sequelize || !db.sequelize.connectionManager.hasConnection()) {
+        console.warn('⚠️ [Database] Database bağlantısı yok, seller bilgileri kaydedilmiyor');
+        return;
+      }
+
       setImmediate(async () => {
         try {
           await saveSellersToDatabase(result.data, asinList[0], sourceMarketplace, targetCountry);
